@@ -16,6 +16,17 @@ How it works:
   4. If it matches EXACTLY ONCE, print the new offset = match position +
      fingerprint length.
 
+OFFSETS ARE FILE OFFSETS. OLD_OFFSET_HEX is a position in the file passed as
+OLD_BINARY (that's what gets `seek`ed/searched), and NEW OFFSET is a position
+in NEW_BINARY - not an RVA / Ghidra address / vmaddr, even though the rest of
+the repo (config.py, --offset, Frida's `module.base + offset`) speaks RVA. The
+two coincide for a thin Mach-O slice (its __TEXT segment starts at file offset
+0), so for the iOS `UnityFramework` case you can pass the RVA straight in. They
+do NOT coincide for a fat/universal Mach-O (add the arch slice's file offset)
+or for an ELF such as Android's `libil2cpp.so` (depends on the PT_LOAD
+segment's p_offset vs p_vaddr - check with `readelf -lW`). Convert first in
+those cases, in both directions.
+
 Assumption: the algorithm/struct layout hasn't changed between the two
 builds, only the code has moved due to a rebuild (true for most
 minor/patch updates, may not hold for a major update that changes the
@@ -27,11 +38,43 @@ Usage:
 Example:
     python relocate_offset.py UnityFramework_old 0xab68fc8 UnityFramework_new
 """
+import os
 import sys
 import argparse
 from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
 
+from _common import parse_offset  # same hex parsing as the drivers' --offset
+
 INSTR_LEN = 4  # AArch64: every instruction is a fixed 4 bytes
+
+
+class RelocateError(RuntimeError):
+    """A problem with the inputs or with what the fingerprint found - as
+    opposed to a bug. main() reports these as one `[!]` line, no traceback.
+    (Subclasses RuntimeError so callers that already catch that keep working.)"""
+
+
+def check_offset(path, offset):
+    """Reject an `offset` that can't be a fingerprint anchor in `path`, with a
+    message that names the real problem. Without this, a bad offset just
+    produced "found 0 safe instructions - try a larger lookback", which is the
+    wrong advice: no lookback window fixes an offset that's out of range or
+    misaligned."""
+    if offset % INSTR_LEN:
+        raise RelocateError(
+            f"offset 0x{offset:x} is not {INSTR_LEN}-byte aligned - AArch64 code is "
+            f"fixed-width, so a function can't start here. Is it the right kind of "
+            f"offset? (This tool takes FILE offsets - see the module docstring.)")
+    size = os.path.getsize(path)  # OSError (missing file) is handled by main()
+    if offset > size:
+        raise RelocateError(
+            f"offset 0x{offset:x} is past the end of {path} (0x{size:x} bytes). This "
+            f"tool takes FILE offsets; if 0x{offset:x} is an RVA / Ghidra address, it "
+            f"only equals the file offset for a thin Mach-O slice - for a fat "
+            f"Mach-O or an ELF (libil2cpp.so) convert it first.")
+    if offset < INSTR_LEN:
+        raise RelocateError(
+            f"offset 0x{offset:x} has no instructions before it to fingerprint.")
 
 
 def is_pc_relative(insn):
@@ -56,9 +99,10 @@ def is_pc_relative(insn):
 
 
 def build_fingerprint(old_path, old_offset, min_instrs, lookback_window=64):
+    check_offset(old_path, old_offset)
     base = max(0, old_offset - lookback_window)
     if old_offset - base < INSTR_LEN:
-        raise RuntimeError("Could not disassemble anything before old_offset - increase lookback_window.")
+        raise RelocateError("Could not disassemble anything before old_offset - increase lookback_window.")
 
     with open(old_path, "rb") as f:
         f.seek(base)
@@ -81,7 +125,7 @@ def build_fingerprint(old_path, old_offset, min_instrs, lookback_window=64):
         safe_insns.insert(0, insn)
 
     if len(safe_insns) < min_instrs:
-        raise RuntimeError(
+        raise RelocateError(
             f"Only found {len(safe_insns)} consecutive safe instructions right "
             f"before the offset (need >= {min_instrs}). Try a larger lookback_window or a lower --min-instrs."
         )
@@ -118,16 +162,21 @@ def find_new_offset(new_path, fingerprint):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("old_binary")
-    ap.add_argument("old_offset", help="hex, e.g. 0xab68fc8")
+    ap.add_argument("old_offset", type=parse_offset,
+                    help="FILE offset in old_binary, hex, e.g. 0xab68fc8 (see module docstring)")
     ap.add_argument("new_binary")
     ap.add_argument("--min-instrs", type=int, default=4)
     ap.add_argument("--lookback", type=int, default=64)
     args = ap.parse_args()
 
-    old_offset = int(args.old_offset, 16)
+    old_offset = args.old_offset
 
-    fingerprint = build_fingerprint(args.old_binary, old_offset, args.min_instrs, args.lookback)
-    matches = find_new_offset(args.new_binary, fingerprint)
+    try:
+        fingerprint = build_fingerprint(args.old_binary, old_offset, args.min_instrs, args.lookback)
+        matches = find_new_offset(args.new_binary, fingerprint)
+    except (RelocateError, OSError) as e:
+        print(f"[!] {e}", file=sys.stderr)
+        sys.exit(2)
 
     print(f"\n[+] Matches found in the new build: {len(matches)}")
     if len(matches) == 0:

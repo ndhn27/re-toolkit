@@ -55,7 +55,12 @@ if (FRIDA_OFFSET === 0x0) {
         "before running. See docs/ITERATION_HISTORY.md for how to find it.");
 }
 
-const { records, rpcExports } = /** @type {import("./_lib.js").RecordStore<RecommendConfigRecord>} */ (createRecordStore());
+// Keyed by `${type}:${id}`, not `id` alone: every record carries a `type`
+// discriminator (+0x0c), and nothing here establishes that `id` is unique
+// across types. With an id-only key, two records of different types that
+// share an id would overwrite each other (and getCount() would under-report).
+const { records, put, rpcExports } = /** @type {import("./_lib.js").RecordStore<RecommendConfigRecord>} */ (
+    createRecordStore((r) => `${r.type}:${r.id}`));
 const logSkip = createSkipLogger("DeviceRecommendConfig");
 
 function installHook(mod) {
@@ -100,9 +105,15 @@ function installHook(mod) {
                     szConfig: readIl2CppString(rec.add(0x60).readPointer()),
                 };
 
-                const isNew = !records.has(id);
-                records.set(id, rec_data);
+                const { key, isNew, changed } = put(rec_data);
 
+                if (changed) {
+                    // Same type:id re-sent with different contents - either a
+                    // real server-side update or a genuine key collision;
+                    // the newer record has replaced the older one.
+                    console.log(`[!] key ${key} re-sent with DIFFERENT contents - replaced ` +
+                        `(szConfig="${rec_data.szConfig}")`);
+                }
                 if (isNew) {
                     console.log(`[new #${records.size}] id=${rec_data.id} type=${rec_data.type} szConfig="${rec_data.szConfig}" ` +
                         `param1=[${rec_data.paramMin1},${rec_data.paramMax1}] param2=[${rec_data.paramMin2},${rec_data.paramMax2}] param3=[${rec_data.paramMin3},${rec_data.paramMax3}] ` +

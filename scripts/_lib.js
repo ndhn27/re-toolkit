@@ -122,7 +122,13 @@ export function createSkipLogger(what) {
  *
  * @template T
  * @typedef {Object} RecordStore
- * @property {Map<number, T>} records - accumulated records, keyed by their numeric id
+ * @property {Map<string|number, T>} records - accumulated records, keyed by
+ *   whatever `keyOf` returned for them (the numeric `id` by default)
+ * @property {(rec: T) => {key: string|number, isNew: boolean, changed: boolean}} put
+ *   - store `rec` under `keyOf(rec)`. `isNew`: that key wasn't present
+ *   before. `changed`: the key WAS present but with different contents, i.e.
+ *   this write silently replaced a different record - either the server
+ *   pushed an update, or `keyOf` isn't unique enough (see createRecordStore)
  * @property {{getCount: () => number, getRecords: () => T[], clear: () => boolean}} rpcExports
  *   - exposed as `rpc.exports` so the Python drivers in tools/ can pull the
  *   accumulated table over RPC (see tools/records.py for the Python-side
@@ -130,16 +136,35 @@ export function createSkipLogger(what) {
  */
 
 /**
- * An id -> record `Map`, plus the matching rpc.exports (getCount /
+ * A key -> record `Map`, plus the matching rpc.exports (getCount /
  * getRecords / clear) that every "dump the whole table" agent
  * (dump_hd_quality_list.js, dump_recommend_config.js) exposes so the
  * Python drivers in tools/ can pull the accumulated table over RPC.
  *
+ * The key defaults to `rec.id`, which is right whenever `id` is unique
+ * across the whole table (DeviceQualityAllowList has no other
+ * discriminator). If a record ALSO carries a type/category field and `id`
+ * is only unique *within* that type, keying on `id` alone makes records of
+ * different types overwrite each other and `getCount()` under-report -
+ * pass a `keyOf` that includes the discriminator (DeviceRecommendConfig
+ * uses `${type}:${id}`). `put()` reports when a key is re-written with
+ * DIFFERENT contents so a bad key shows up in the log instead of as
+ * silently missing rows.
+ *
  * @template T
+ * @param {(rec: T) => string|number} [keyOf] - defaults to `rec.id`
  * @returns {RecordStore<T>}
  */
-export function createRecordStore() {
+export function createRecordStore(keyOf = (rec) => /** @type {any} */ (rec).id) {
     const records = new Map();
+    const put = (rec) => {
+        const key = keyOf(rec);
+        const prev = records.get(key);
+        const isNew = prev === undefined;
+        const changed = !isNew && JSON.stringify(prev) !== JSON.stringify(rec);
+        records.set(key, rec);
+        return { key, isNew, changed };
+    };
     const rpcExports = {
         getCount: () => records.size,
         getRecords: () => Array.from(records.values()),
@@ -148,5 +173,5 @@ export function createRecordStore() {
             return true;
         },
     };
-    return { records, rpcExports };
+    return { records, put, rpcExports };
 }

@@ -243,21 +243,41 @@ class TestBuildFingerprint:
         assert fp == pack(SAFE4)
         assert "from 0x0 to 0x10" in capsys.readouterr().out
 
-    @pytest.mark.parametrize("offset, lookback", [
-        pytest.param(0, 64, id="offset-0"),
-        pytest.param(16, 2, id="lookback-smaller-than-one-instruction"),
-    ])
-    def test_nothing_to_disassemble_raises(self, tmp_path, offset, lookback):
+    def test_lookback_smaller_than_one_instruction_raises(self, tmp_path):
         path = write_bin(tmp_path, SAFE4 + [NOP])
 
-        with pytest.raises(RuntimeError, match="Could not disassemble anything"):
-            ro.build_fingerprint(path, offset, min_instrs=4, lookback_window=lookback)
+        with pytest.raises(ro.RelocateError, match="increase lookback_window"):
+            ro.build_fingerprint(path, 16, min_instrs=4, lookback_window=2)
 
-    def test_offset_beyond_end_of_file_raises(self, tmp_path):
+    def test_offset_0_says_nothing_precedes_it_not_to_grow_the_lookback(self, tmp_path):
+        # No lookback window can help an offset with nothing in front of it,
+        # so the message must not suggest one.
+        path = write_bin(tmp_path, SAFE4 + [NOP])
+
+        with pytest.raises(ro.RelocateError, match="no instructions before it") as ei:
+            ro.build_fingerprint(path, 0, min_instrs=4)
+        assert "lookback" not in str(ei.value)
+
+    def test_offset_beyond_end_of_file_points_at_offset_kind_not_lookback(self, tmp_path):
         path = write_bin(tmp_path, SAFE4)  # 16 bytes
 
-        with pytest.raises(RuntimeError, match="Only found 0"):
+        with pytest.raises(ro.RelocateError, match="past the end") as ei:
             ro.build_fingerprint(path, 64, min_instrs=4)
+        msg = str(ei.value)
+        assert "FILE offset" in msg and "lookback" not in msg
+
+    @pytest.mark.parametrize("offset", [0x11, 0x12, 0x13])
+    def test_misaligned_offset_raises_alignment_error(self, tmp_path, offset):
+        path = write_bin(tmp_path, SAFE4 + [NOP, NOP])
+
+        with pytest.raises(ro.RelocateError, match="not 4-byte aligned") as ei:
+            ro.build_fingerprint(path, offset, min_instrs=1)
+        assert "lookback" not in str(ei.value)
+
+    def test_offset_exactly_at_end_of_file_is_accepted(self, tmp_path):
+        path = write_bin(tmp_path, SAFE4)  # 16 bytes; offset 16 == size
+
+        assert ro.build_fingerprint(path, 16, min_instrs=4) == pack(SAFE4)
 
     def test_lookback_window_caps_fingerprint_length(self, tmp_path):
         words = [MOV_X, ADD] * 16 + [NOP]  # 32 safe words, offset after them
@@ -402,3 +422,72 @@ def test_exits_1_and_lists_candidates_when_fingerprint_is_ambiguous(tmp_path, mo
     assert "candidate: 0x%x" % OLD_OFFSET in out
     assert "candidate: 0x%x" % second_copy_end in out
     assert "NEW OFFSET" not in out
+
+
+# --------------------------------------------------------------------------
+# main(): bad input is one `[!]` line + exit 2, never a raw traceback
+# --------------------------------------------------------------------------
+
+def run_main_err(monkeypatch, capsys, *argv):
+    """Like run_main, but also returns stderr (where [!] errors go)."""
+    monkeypatch.setattr(sys, "argv", ["relocate_offset.py"] + list(argv))
+    try:
+        ro.main()
+        code = 0
+    except SystemExit as e:
+        code = e.code
+    cap = capsys.readouterr()
+    return code, cap.out, cap.err
+
+
+@pytest.mark.parametrize("bad_hex", ["0xZZ", "zz", "", "0x"])
+def test_bad_hex_offset_is_a_usage_error_not_a_traceback(tmp_path, monkeypatch, capsys, bad_hex):
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_bin(tmp_path, OLD_WORDS, "new.bin")
+
+    code, out, err = run_main_err(monkeypatch, capsys, old, bad_hex, new)
+
+    assert code == 2
+    assert "Traceback" not in err
+    assert "not a hex offset" in err
+
+
+def test_offset_past_eof_exits_2_with_one_line_message(tmp_path, monkeypatch, capsys):
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_bin(tmp_path, OLD_WORDS, "new.bin")
+
+    code, out, err = run_main_err(monkeypatch, capsys, old, "0x100000", new)
+
+    assert code == 2
+    assert err.startswith("[!] offset 0x100000 is past the end")
+    assert "Traceback" not in err
+
+
+def test_misaligned_offset_exits_2(tmp_path, monkeypatch, capsys):
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_bin(tmp_path, OLD_WORDS, "new.bin")
+
+    code, out, err = run_main_err(monkeypatch, capsys, old, hex(OLD_OFFSET + 2), new)
+
+    assert code == 2
+    assert "not 4-byte aligned" in err
+
+
+def test_missing_file_exits_2_without_traceback(tmp_path, monkeypatch, capsys):
+    new = write_bin(tmp_path, OLD_WORDS, "new.bin")
+
+    code, out, err = run_main_err(monkeypatch, capsys, str(tmp_path / "nope.bin"), hex(OLD_OFFSET), new)
+
+    assert code == 2
+    assert err.startswith("[!]") and "Traceback" not in err
+
+
+def test_too_few_safe_instructions_is_also_a_clean_exit_2(tmp_path, monkeypatch, capsys):
+    old = write_bin(tmp_path, [BL, BL, BL, BL], "old.bin")
+    new = write_bin(tmp_path, OLD_WORDS, "new.bin")
+
+    code, out, err = run_main_err(monkeypatch, capsys, old, "0x10", new)
+
+    assert code == 2
+    assert "Only found 0" in err and "Traceback" not in err
+

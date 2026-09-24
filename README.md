@@ -91,8 +91,11 @@ This won't run against anything as-is — it's a worked example to copy the
    map for it with an IL2CPP dumper, then load both into Ghidra.
 2. **Find your target function's offset.** Locate the class/method you
    care about in `dump.cs`, find its `...$$unpack` (or whatever function
-   you're hooking) in Ghidra's Symbol Table, and note its file offset with
-   Image Base set to `0`. `scripts/list_il2cpp_exports.js` can help locate
+   you're hooking) in Ghidra's Symbol Table, and note its address with
+   Image Base set to `0` - that's the RVA the agents and `--offset` take.
+   (An RVA is not the same thing as a *file offset*: they coincide for a thin
+   Mach-O slice like `UnityFramework`, but not for a fat Mach-O or an ELF -
+   see the note on `tools/relocate_offset.py`, which works in file offsets.) `scripts/list_il2cpp_exports.js` can help locate
    `il2cpp_init` and other entry points if the binary is stripped.
 3. **Work out the record layout.** Point a copy of
    `scripts/dump_recommend_config_probe.js` at your offset to hexdump raw
