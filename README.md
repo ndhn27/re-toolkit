@@ -116,7 +116,11 @@ This won't run against anything as-is — it's a worked example to copy the
 6. **Carry offsets forward across updates.** When the app ships a new
    binary and offsets shift, `tools/relocate_offset.py` can re-locate a
    known offset in the new build via instruction fingerprinting, instead
-   of re-deriving it by hand in Ghidra every time.
+   of re-deriving it by hand in Ghidra every time. Each candidate is
+   checked (alignment, inside an executable section, how the surrounding
+   code compares to the old build) and reported with a HIGH/MEDIUM/LOW
+   confidence - that is a sanity check around a byte fingerprint, not
+   control-flow analysis, so verify the result once before trusting it.
 
 ## Requirements
 
@@ -284,6 +288,10 @@ What's covered: which instructions count as PC-relative (`is_pc_relative`),
 how `build_fingerprint` picks the safe run in front of the offset (barrier
 instructions, undecodable words, `--min-instrs`, `--lookback`, start/end of
 file) and how `find_new_offset` / `main` behave with 0, 1 and several matches.
+The validation step that runs on every raw byte match is covered too:
+alignment, "is this match inside an executable section?" for thin/fat
+Mach-O and ELF64 containers (built in memory by `tests/binfmt_fixtures.py`),
+and the soft context checks that produce the HIGH/MEDIUM/LOW label.
 
 `tests/` also covers smaller things, all dependency-free (no capstone or
 Frida needed): `test_check_placeholders.py` exercises the pre-commit/CI
@@ -291,8 +299,9 @@ check from "Keeping real offsets out of git" above against fixture files,
 `test_records_schema.py` diffs the JSDoc/`TypedDict` record shapes from
 "Record shapes" below against each other, `test_common.py` covers the
 CLI/env/`config.py` precedence and the `FRIDA_OFFSET` injection, and
-`test_run_hd_quality_dump.py` pins the driver's spawn/resume/detach
-lifecycle against a stubbed `frida` module.
+`test_run_hd_quality_dump.py` and `test_list_exports.py` pin the drivers'
+spawn/resume/detach lifecycle (shared via `_common.spawn_agent`) against a
+stubbed `frida` module.
 
 ## Record shapes
 

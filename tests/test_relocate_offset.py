@@ -20,6 +20,8 @@ import pytest
 from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
 
 import relocate_offset as ro
+from binfmt_fixtures import (CODE, CPU_ARM64, CPU_X86_64, NOT_CODE, S_CSTRING_LITERALS,
+                             build_elf64, build_fat, build_macho)
 
 _MD = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
 
@@ -491,3 +493,257 @@ def test_too_few_safe_instructions_is_also_a_clean_exit_2(tmp_path, monkeypatch,
     assert code == 2
     assert "Only found 0" in err and "Traceback" not in err
 
+
+
+# --------------------------------------------------------------------------
+# executable_ranges(): where code can live, per container format
+# --------------------------------------------------------------------------
+
+DATA = b"\xbb" * 32
+
+
+def test_macho_returns_only_instruction_sections_with_absolute_offsets():
+    blob, lay = build_macho([
+        ("__TEXT", 5, [("__text", CODE, b"\x11" * 64), ("__stubs", CODE, b"\x22" * 16),
+                       ("__cstring", S_CSTRING_LITERALS, b"hello\0" * 4)]),
+        ("__DATA", 3, [("__data", NOT_CODE, DATA)]),
+    ])
+
+    fmt, ranges = ro.executable_ranges(blob)
+
+    assert fmt == "Mach-O"
+    assert ranges == [(*lay["__TEXT,__text"], "__TEXT,__text"),
+                      (*lay["__TEXT,__stubs"], "__TEXT,__stubs")]
+
+
+def test_macho_without_instruction_sections_falls_back_to_executable_segments():
+    blob, lay = build_macho([("__TEXT", 5, [("__const", NOT_CODE, DATA)]),
+                             ("__DATA", 3, [("__data", NOT_CODE, DATA)])])
+
+    fmt, ranges = ro.executable_ranges(blob)
+
+    assert [r[2] for r in ranges] == ["segment __TEXT"]      # __DATA isn't executable
+    assert ranges[0][:2] == lay["__TEXT,__const"]
+
+
+def test_fat_macho_uses_only_arm64_slices_and_makes_offsets_absolute():
+    arm, arm_lay = build_macho([("__TEXT", 5, [("__text", CODE, b"\x11" * 64)])], CPU_ARM64)
+    x86, _ = build_macho([("__TEXT", 5, [("__text", CODE, b"\x22" * 64)])], CPU_X86_64)
+    blob, offs = build_fat([(CPU_X86_64, x86), (CPU_ARM64, arm)])
+
+    fmt, ranges = ro.executable_ranges(blob)
+
+    start, end = arm_lay["__TEXT,__text"]
+    assert ranges == [(offs[1] + start, offs[1] + end, "__TEXT,__text")]
+
+
+def test_fat_macho_without_an_arm64_slice_has_no_code_ranges():
+    x86, _ = build_macho([("__TEXT", 5, [("__text", CODE, b"\x22" * 64)])], CPU_X86_64)
+    blob, _ = build_fat([(CPU_X86_64, x86)])
+
+    assert ro.executable_ranges(blob) == ("fat Mach-O (arm64 slices)", [])
+
+
+def test_elf_returns_only_executable_load_segments():
+    blob, spans = build_elf64([(1, 4, b"\x11" * 32),       # PT_LOAD  R
+                               (1, 5, b"\x22" * 64),       # PT_LOAD  R X
+                               (1, 6, b"\x33" * 32),       # PT_LOAD  RW
+                               (4, 5, b"\x44" * 16)])      # PT_NOTE, even with X set: not a load
+    fmt, ranges = ro.executable_ranges(blob)
+
+    assert fmt == "ELF64"
+    assert [(a, b) for a, b, _ in ranges] == [spans[1]]
+
+
+@pytest.mark.parametrize("blob", [
+    pytest.param(pack(SAFE4), id="raw-instruction-words"),
+    pytest.param(b"", id="empty"),
+    pytest.param(b"\x7fELF\x01\x01" + b"\0" * 60, id="elf32"),
+    pytest.param(b"\x7fELF\x02\x02" + b"\0" * 60, id="elf64-big-endian"),
+    pytest.param(b"\xca\xfe\xba\xbe\x00\x00\x00\x34" + b"\0" * 60, id="java-class-not-fat"),
+    pytest.param(build_macho([("__TEXT", 5, [("__text", CODE, b"\x11" * 64)])])[0][:60],
+                 id="truncated-macho"),
+])
+def test_unrecognised_or_malformed_files_are_none_not_an_error(blob):
+    assert ro.executable_ranges(blob) is None
+
+
+# --------------------------------------------------------------------------
+# validate_candidates() / main(): reject non-code matches, grade the rest
+# --------------------------------------------------------------------------
+
+FP = pack(SAFE_RUN)
+HOOK_OFFSET_IN_NEW_TEXT = (10 + 2 + len(SAFE_RUN)) * 4
+NEW_TEXT_WORDS = [NOP] * 10 + [ADRP_MOVED, BL_MOVED] + SAFE_RUN + [LDR_LIT_X, RET] + [NOP] * 6
+
+
+def write_blob(tmp_path, blob, name):
+    path = tmp_path / name
+    path.write_bytes(blob)
+    return str(path)
+
+
+def validate(tmp_path, new_blob, matches=None):
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, new_blob, "new.bin")
+    if matches is None:
+        matches = ro.find_new_offset(new, FP)
+    return ro.validate_candidates(old, OLD_OFFSET, new, FP, matches)
+
+
+def status(cand, name):
+    return next(c.status for c in cand.checks if c.name == name)
+
+
+def test_a_match_that_is_not_word_aligned_is_rejected(tmp_path):
+    # Same bytes, but starting one byte into the file: not an instruction boundary.
+    (cand,) = validate(tmp_path, b"\x00" + pack([NOP] * 2 + SAFE_RUN + [RET]))
+
+    assert cand.match % 4 == 1
+    assert cand.confidence == "rejected"
+    assert "boundary" in cand.rejected[0]
+
+
+def test_main_rejecting_every_match_exits_1_and_says_why(tmp_path, monkeypatch, capsys):
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, b"\x00" + pack([NOP] * 2 + SAFE_RUN + [RET]), "new.bin")
+
+    code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
+
+    assert code == 1
+    assert "Matches found in the new build: 1" in out
+    assert "Surviving validation: 0 of 1" in out and "rejected 0x" in out
+    assert "NEW OFFSET" not in out
+
+
+def test_byte_match_in_a_data_section_is_rejected_and_the_code_match_survives(tmp_path, monkeypatch, capsys):
+    # The same bytes exist once as code and once in __cstring: a raw search
+    # calls that ambiguous, the section check knows one of them is data.
+    blob, lay = build_macho([
+        ("__TEXT", 5, [("__text", CODE, pack(NEW_TEXT_WORDS)),
+                       ("__cstring", S_CSTRING_LITERALS, pack(SAFE_RUN + [LDR_LIT_X, RET]))]),
+    ])
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, blob, "new.bin")
+    expected = lay["__TEXT,__text"][0] + HOOK_OFFSET_IN_NEW_TEXT
+    assert len(ro.find_new_offset(new, FP)) == 2
+
+    code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
+
+    assert code == 0
+    assert "Matches found in the new build: 2" in out
+    assert "Surviving validation: 1 of 2" in out
+    assert "NEW OFFSET: 0x%x" % expected in out
+    assert "not inside an executable Mach-O region" in out
+
+
+def test_no_validate_restores_the_raw_ambiguous_result(tmp_path, monkeypatch, capsys):
+    blob, _ = build_macho([
+        ("__TEXT", 5, [("__text", CODE, pack(NEW_TEXT_WORDS)),
+                       ("__cstring", S_CSTRING_LITERALS, pack(SAFE_RUN + [LDR_LIT_X, RET]))]),
+    ])
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, blob, "new.bin")
+
+    code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new, "--no-validate")
+
+    assert code == 1
+    assert "--no-validate" in out and "More than one match" in out
+
+
+def test_match_only_in_data_exits_1(tmp_path, monkeypatch, capsys):
+    blob, _ = build_macho([
+        ("__TEXT", 5, [("__text", CODE, pack([NOP] * 16)),
+                       ("__const", NOT_CODE, pack(SAFE_RUN + [LDR_LIT_X, RET]))]),
+    ])
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, blob, "new.bin")
+
+    code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
+
+    assert code == 1
+    assert "Surviving validation: 0 of 1" in out and "NEW OFFSET" not in out
+
+
+def test_match_whose_hook_point_falls_outside_the_section_is_rejected(tmp_path):
+    # The fingerprint is the very last thing in __text; the word at the hook
+    # offset already belongs to the next (data) section.
+    blob, _ = build_macho([
+        ("__TEXT", 5, [("__text", CODE, pack([NOP] * 4 + SAFE_RUN)),
+                       ("__const", NOT_CODE, pack([LDR_LIT_X, RET]))]),
+    ])
+
+    (cand,) = validate(tmp_path, blob)
+
+    assert cand.confidence == "rejected"
+    assert "run past the end of __TEXT,__text" in cand.rejected[0]
+
+
+def test_elf_read_only_segment_match_is_rejected_and_exec_segment_match_survives(tmp_path):
+    code_seg = pack(NEW_TEXT_WORDS)
+    ro_seg = pack(SAFE_RUN + [LDR_LIT_X, RET])
+    blob, spans = build_elf64([(1, 4, ro_seg), (1, 5, code_seg)])
+
+    cands = validate(tmp_path, blob)
+
+    assert [c.confidence == "rejected" for c in cands] == [True, False]
+    assert cands[1].offset == spans[1][0] + HOOK_OFFSET_IN_NEW_TEXT
+    assert status(cands[1], "executable-section") == "pass"
+
+
+def test_faithful_relocation_inside_a_real_container_is_high_confidence(tmp_path):
+    blob, _ = build_macho([("__TEXT", 5, [("__text", CODE, pack(NEW_TEXT_WORDS))])])
+
+    (cand,) = validate(tmp_path, blob)
+
+    assert not cand.rejected
+    assert cand.confidence == "HIGH"
+    assert [status(cand, n) for n in ("alignment", "executable-section", "after-decode",
+                                      "before-anchor", "after-similarity")] == ["pass"] * 5
+
+
+def test_unknown_container_can_never_be_high_confidence(tmp_path):
+    # Same faithful relocation, but a raw blob: nothing proves it's in a code section.
+    (cand,) = validate(tmp_path, pack(NEW_TEXT_WORDS))
+
+    assert status(cand, "executable-section") == "n/a"
+    assert cand.confidence == "MEDIUM"
+
+
+def test_different_barrier_before_the_fingerprint_is_a_soft_failure_not_a_rejection(tmp_path):
+    # `b` where the old build had `bl` in front of the run.
+    words = [NOP] * 10 + [ADRP_MOVED, B] + SAFE_RUN + [LDR_LIT_X, RET] + [NOP] * 6
+    blob, _ = build_macho([("__TEXT", 5, [("__text", CODE, pack(words))])])
+
+    (cand,) = validate(tmp_path, blob)
+
+    assert not cand.rejected
+    assert status(cand, "before-anchor") == "fail"
+    assert cand.confidence == "MEDIUM"
+
+
+@needs_undecodable
+def test_data_like_words_after_the_hook_point_give_low_confidence_but_still_succeed(
+        tmp_path, monkeypatch, capsys):
+    words = [NOP] * 10 + [ADRP_MOVED, B] + SAFE_RUN + [BAD] * 6
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, pack(words), "new.bin")
+
+    (cand,) = ro.validate_candidates(old, OLD_OFFSET, new, FP, ro.find_new_offset(new, FP))
+    assert status(cand, "after-decode") == "fail" and cand.confidence == "LOW"
+
+    code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
+    assert code == 0                       # a soft grade never blocks a unique match
+    assert "(confidence: LOW)" in out and "Check this one in Ghidra" in out
+
+
+def test_successful_main_prints_the_confidence_and_the_checks(tmp_path, monkeypatch, capsys):
+    blob, lay = build_macho([("__TEXT", 5, [("__text", CODE, pack(NEW_TEXT_WORDS))])])
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, blob, "new.bin")
+
+    code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
+
+    assert code == 0
+    assert "NEW OFFSET: 0x%x  (confidence: HIGH)" % (lay["__TEXT,__text"][0] + HOOK_OFFSET_IN_NEW_TEXT) in out
+    assert "executable-section: inside __TEXT,__text" in out

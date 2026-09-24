@@ -19,6 +19,12 @@ AGENT_PATH is resolved from this file's own location (via __file__), not
 the current working directory - see run_hd_quality_dump.py's docstring
 for why (a "../dist/..." path would be resolved against the CWD and raise
 FileNotFoundError when run from the repo root).
+
+Lifecycle: same as run_hd_quality_dump.py, via _common.spawn_agent(). If
+anything fails between spawn and resume (attach, script creation, script
+load) the still-suspended process is killed rather than left frozen, and the
+session is always detached on the way out. Ctrl+C during the wait just ends
+it early - the session is detached either way.
 """
 import argparse
 import time
@@ -26,7 +32,7 @@ from pathlib import Path
 
 import frida
 
-from _common import add_override_args, load_agent_source, resolve_settings
+from _common import add_override_args, load_agent_source, resolve_settings, spawn_agent
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENT_PATH = str(REPO_ROOT / "dist" / "list_il2cpp_exports.js")
@@ -55,21 +61,16 @@ def main():
         print(f"[!] Session detached, reason: {reason}")
 
     print(f"[*] Spawning {settings.target}...")
-    pid = device.spawn([settings.target])
-    session = device.attach(pid)
-    session.on("detached", on_detached)
+    with spawn_agent(device, settings.target, source, on_message, on_detached) as run:
+        run.resume()
+        print(f"[*] Spawned and resumed, pid={run.pid}")
+        print(f"[*] Waiting {WAIT_SECONDS}s for the agent to list exports...")
+        try:
+            time.sleep(WAIT_SECONDS)
+        except KeyboardInterrupt:
+            print("\n[*] Interrupted - detaching early.")
 
-    script = session.create_script(source)
-    script.on("message", on_message)
-    script.load()
-
-    device.resume(pid)
-    print(f"[*] Spawned and resumed, pid={pid}")
-    print(f"[*] Waiting {WAIT_SECONDS}s for the agent to list exports...")
-    time.sleep(WAIT_SECONDS)
-
-    session.detach()
-    print("[*] Detached. See the log above.")
+    print("[*] See the log above.")
 
 
 if __name__ == "__main__":

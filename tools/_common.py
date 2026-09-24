@@ -4,10 +4,14 @@ _common.py
 Small shared helper for the driver scripts in tools/. Not meant to be run
 directly.
 
-Two jobs:
+Three jobs:
   1. load_agent_source(): read a bundled Frida agent and (optionally) inject
      FRIDA_OFFSET into it.
-  2. add_override_args() / resolve_settings(): let every driver take TARGET,
+  2. spawn_agent(): the spawn -> attach -> load -> (caller resumes) -> detach
+     lifecycle every driver shares, so a failure between spawn and resume
+     can't leave the app frozen and a driver can't drift out of step with
+     the others.
+  3. add_override_args() / resolve_settings(): let every driver take TARGET,
      REMOTE_ADDR and FRIDA_OFFSET from the command line or from environment
      variables, falling back to the defaults in config.py. Precedence:
 
@@ -27,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import config
@@ -170,3 +175,62 @@ def is_gitignored(path):
     if result.returncode == 1:
         return False
     return None  # 128: not a repository / path outside it
+
+
+class AgentRun:
+    """Handle yielded by spawn_agent(): the spawned pid, the attached session
+    and the loaded script, plus resume() for the one step the caller times."""
+
+    def __init__(self, device, pid):
+        self.device = device
+        self.pid = pid
+        self.session = None
+        self.script = None
+        self.resumed = False
+
+    def resume(self):
+        """Let the spawned process run. Until this succeeds, leaving the
+        `with` block (normally or by exception) kills the process."""
+        self.device.resume(self.pid)
+        self.resumed = True
+
+
+@contextmanager
+def spawn_agent(device, target, source, on_message, on_detached=None):
+    """Spawn `target` suspended, attach, load the agent `source`, and yield an
+    AgentRun. The caller decides when to `run.resume()`.
+
+    Guarantees on the way out, however the block ends (normal return, an
+    exception, Ctrl+C):
+      - if the process was never resumed - i.e. attach, script creation,
+        script load (e.g. a hook that can't be installed at the given offset)
+        or resume itself failed - it is killed rather than left frozen at
+        spawn;
+      - the session, if one was attached, is detached.
+    Cleanup errors are swallowed so they can't mask the original exception;
+    that exception still propagates.
+    """
+    pid = device.spawn([target])
+    run = AgentRun(device, pid)
+    try:
+        run.session = device.attach(pid)
+        if on_detached is not None:
+            run.session.on("detached", on_detached)
+
+        run.script = run.session.create_script(source)
+        run.script.on("message", on_message)
+        run.script.load()
+
+        yield run
+    finally:
+        if not run.resumed:
+            try:
+                device.kill(pid)
+            except Exception:
+                pass
+        if run.session is not None:
+            try:
+                run.session.detach()
+                print("[*] Detached.")
+            except Exception:
+                pass

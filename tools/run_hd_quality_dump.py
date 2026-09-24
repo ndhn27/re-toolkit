@@ -40,8 +40,9 @@ next run doesn't overwrite the previous dump.
 Lifecycle: if anything fails between spawn and resume (attach, script
 creation, script load - e.g. a hook that can't be installed at the given
 offset), the still-suspended process is killed rather than left frozen, and
-the session is always detached on the way out. Ctrl+C at the "press Enter"
-prompt is treated like Enter: the records collected so far are exported.
+the session is always detached on the way out (both handled by
+_common.spawn_agent(), shared with list_exports.py). Ctrl+C at the "press
+Enter" prompt is treated like Enter: the records collected so far are exported.
 
 Usage:
     python run_hd_quality_dump.py --offset 0xab68fc8
@@ -73,7 +74,8 @@ from typing import TYPE_CHECKING
 
 import frida
 
-from _common import add_override_args, is_gitignored, load_agent_source, resolve_settings
+from _common import (add_override_args, is_gitignored, load_agent_source,
+                     resolve_settings, spawn_agent)
 
 if TYPE_CHECKING:
     # Only needed to resolve the type comment on `recs` below - guarding it
@@ -161,20 +163,9 @@ def main():
         print(f"[!] Session detached, reason: {reason}")
 
     print(f"[*] Spawning {settings.target}...")
-    pid = device.spawn([settings.target])
-    resumed = False
-    session = None
-    try:
-        session = device.attach(pid)
-        session.on("detached", on_detached)
-
-        script = session.create_script(source)
-        script.on("message", on_message)
-        script.load()
-
-        device.resume(pid)
-        resumed = True
-        print(f"[*] Spawned and resumed, pid={pid}")
+    with spawn_agent(device, settings.target, source, on_message, on_detached) as run:
+        run.resume()
+        print(f"[*] Spawned and resumed, pid={run.pid}")
         print("[*] Listening - new records print immediately. Play through the game normally.")
         print("[*] Press Enter at any point to export the records and exit.\n")
 
@@ -183,21 +174,7 @@ def main():
         except KeyboardInterrupt:
             print("\n[*] Interrupted - exporting what was collected so far.")
 
-        export_records(script, settings, args)
-    finally:
-        if not resumed:
-            # Never resumed: the app is still suspended at spawn. Don't leave
-            # it frozen behind a failed attach/load.
-            try:
-                device.kill(pid)
-            except Exception:
-                pass
-        if session is not None:
-            try:
-                session.detach()
-                print("[*] Detached.")
-            except Exception:
-                pass
+        export_records(run.script, settings, args)
 
 
 if __name__ == "__main__":

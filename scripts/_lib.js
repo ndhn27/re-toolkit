@@ -78,24 +78,27 @@ export function waitForModule(moduleName, onReady) {
  * True if `retval` - the raw return value Frida's `Interceptor.attach`
  * hands to `onLeave` - means an `...$$unpack` call FAILED.
  *
- * ASSUMPTION: 0 = success. That's what the hooks in this project were
- * written against, but it is NOT recorded anywhere as verified (neither in
- * docs/MEMORY_LAYOUT.md nor in the iteration history) - re-check it against
- * your own build. If every record shows up as `[skip]`, suspect this first.
+ * Only the LOW 32 BITS are tested. `retval` wraps the full 64-bit x0, but
+ * AArch64 does not define the upper half of x0 when a function returns a
+ * 32-bit `int`/`bool`/enum - the callee only has to get w0 right. Testing
+ * the whole word would therefore read a genuine "0 = success" as a failure
+ * whenever the upper half happens to be dirty, and drop every record. A
+ * low-32-bit test is correct for every return type this could plausibly be
+ * (int, bool, enum, int32 status code) and for a 64-bit value too, except
+ * one whose low half is exactly zero while the high half isn't - for a
+ * status code or a null-vs-pointer result that means a pointer sitting on a
+ * 4 GiB boundary, which isn't a case worth designing around.
  *
- * `retval` is a NativePointer wrapping the full-width return register, and
- * the whole word is compared against zero. That is right if unpack returns
- * a 64-bit value (a pointer, an int64). It is too strict if unpack returns a
- * 32-bit `int`/`bool`: AArch64 does not guarantee the upper 32 bits of x0
- * for such a return, so a genuine "0 = success" could show up non-zero here.
- * In practice a write to w0 zeroes the upper half, so this is unlikely, but
- * this file can't tell which case your build is - which is why
- * createSkipLogger() below spells out when only the upper half is non-zero.
- * If that's what you see, switch this to a low-32-bit test:
- * `retval.and(0xffffffff).isNull()` is the equivalent of `toUInt32() === 0`.
+ * STILL AN ASSUMPTION: that 0 means success. Nothing in this project
+ * records that as verified (not in docs/MEMORY_LAYOUT.md, not in the
+ * iteration history), and no register-width test can settle it - it depends
+ * on what your build's unpack() actually returns. Confirm it in Ghidra (the
+ * function's return type, and the value its success path loads into w0/x0
+ * before `ret`) or by watching a hook see both outcomes. If every record
+ * shows up as `[skip]`, suspect this first.
  */
 export function unpackFailed(retval) {
-    return !retval.isNull();
+    return !retval.and(0xffffffff).isNull();
 }
 
 /**
@@ -110,18 +113,8 @@ export function createSkipLogger(what) {
     let skipped = 0;
     return function logSkip(retval) {
         skipped++;
-        // Low 32 bits zero but the full word isn't: unpackFailed() flagged a
-        // value that would read as 0 if unpack returns a 32-bit int/bool.
-        // Say so, instead of leaving the reader to guess why every record
-        // is being dropped (see unpackFailed()'s doc comment).
-        const upperOnly = retval.and(0xffffffff).isNull();
-        const hint = upperOnly
-            ? " - only the UPPER 32 bits are non-zero: if unpack returns int/bool " +
-              "rather than a 64-bit value this is unspecified register garbage, not a " +
-              "failure; switch unpackFailed() to a low-32-bit test"
-            : "";
-        console.log(`[skip] ${what} unpack() returned ${retval} (expected 0) - ` +
-            `record dropped (total skipped so far: ${skipped})${hint}`);
+        console.log(`[skip] ${what} unpack() returned ${retval} (expected 0 in the low ` +
+            `32 bits) - record dropped (total skipped so far: ${skipped})`);
     };
 }
 

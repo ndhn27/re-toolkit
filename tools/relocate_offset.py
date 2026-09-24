@@ -13,8 +13,37 @@ How it works:
      word (literal pool, jump table) also ends the run.
   2. Concatenate those "safe" instructions into a byte string fingerprint.
   3. Search for that exact byte string in the new build.
-  4. If it matches EXACTLY ONCE, print the new offset = match position +
-     fingerprint length.
+  4. Validate every raw byte match before believing it (a byte string alone
+     can't tell code from data or from a literal pool that happens to hold the
+     same bytes):
+       HARD checks - a candidate that fails one is discarded:
+         - alignment: the match starts on a 4-byte boundary (AArch64
+           instructions can't start anywhere else);
+         - executable section: the fingerprint and the hook point lie inside
+           one executable region of the new build (Mach-O sections flagged as
+           instructions, or ELF PT_LOAD segments with PF_X; fat Mach-O is
+           handled per arm64 slice). Skipped, and reported as such, when the
+           file is neither Mach-O nor ELF (e.g. a raw blob).
+       SOFT checks - reported and folded into a HIGH/MEDIUM/LOW confidence
+       label, never used to discard (the code AT the hook point may legitimately
+       differ between builds - see the assumption below):
+         - the words after the hook point decode at least as cleanly as they
+           did in the old build (data/literal-pool bytes usually don't);
+         - their mnemonic sequence resembles the old build's;
+         - the word just before the fingerprint is the same kind of barrier
+           (same mnemonic, or undecodable) that ended the run in the old build.
+     Disassembling the fingerprint bytes themselves is deliberately not a
+     check: they are the same bytes that were decoded in the old build, so
+     the result would be the same by construction.
+  5. If exactly ONE candidate survives, print the new offset = match position
+     + fingerprint length, with the checks and the confidence label.
+     --no-validate skips step 4 (the raw behaviour: unique byte string =
+     accepted) if the format parser misjudges an unusual binary.
+
+What this is NOT: it does not build a control-flow graph, find function
+boundaries or use symbols. It is still fingerprint matching with sanity
+checks around it. Treat HIGH as "very likely", not "proved", and verify the
+result once in Ghidra or with a hook before relying on it.
 
 OFFSETS ARE FILE OFFSETS. OLD_OFFSET_HEX is a position in the file passed as
 OLD_BINARY (that's what gets `seek`ed/searched), and NEW OFFSET is a position
@@ -34,6 +63,7 @@ logic itself).
 
 Usage:
     python relocate_offset.py OLD_BINARY OLD_OFFSET_HEX NEW_BINARY [--min-instrs N]
+                              [--lookback BYTES] [--no-validate]
 
 Example:
     python relocate_offset.py UnityFramework_old 0xab68fc8 UnityFramework_new
@@ -41,11 +71,32 @@ Example:
 import os
 import sys
 import argparse
+import mmap
+import struct
+from dataclasses import dataclass, field
 from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
 
 from _common import parse_offset  # same hex parsing as the drivers' --offset
 
 INSTR_LEN = 4  # AArch64: every instruction is a fixed 4 bytes
+
+# Validation (see the module docstring). CONTEXT_WORDS is how many words after
+# the hook point are compared between builds; SIMILARITY_MIN is the fraction of
+# them whose mnemonic must match for that soft check to pass. Both are
+# heuristics, not derived from anything - the raw counts are printed so you can
+# judge a result yourself.
+CONTEXT_WORDS = 8
+SIMILARITY_MIN = 0.5
+
+# Binary-format constants used by executable_ranges().
+CPU_TYPE_ARM64 = 0x0100000C          # arm64 and arm64e share this cputype
+MH_MAGIC_64 = 0xFEEDFACF             # thin 64-bit Mach-O, little-endian
+FAT_MAGIC, FAT_MAGIC_64 = 0xCAFEBABE, 0xCAFEBABF   # big-endian on disk
+LC_SEGMENT_64 = 0x19
+VM_PROT_EXECUTE = 0x4
+S_ATTR_PURE_INSTRUCTIONS = 0x80000000
+S_ATTR_SOME_INSTRUCTIONS = 0x00000400
+PT_LOAD, PF_X = 1, 1
 
 
 class RelocateError(RuntimeError):
@@ -158,6 +209,255 @@ def find_new_offset(new_path, fingerprint):
     return idxs
 
 
+# --------------------------------------------------------------------------
+# Executable regions (Mach-O / ELF), as FILE offsets
+# --------------------------------------------------------------------------
+
+def _macho_exec_ranges(buf, base):
+    """Executable (start, end, label) file ranges of the thin 64-bit Mach-O
+    whose header sits at `base` in `buf`. Sections carrying the instruction
+    attributes are preferred; if there are none, executable segments are used.
+    All offsets are made absolute by adding `base`, so this also serves the
+    slices of a fat binary. Raises struct.error on a truncated/garbled file."""
+    _magic, _cputype, _sub, _ftype, ncmds, sizeofcmds = struct.unpack_from("<IiiIII", buf, base)
+    off = base + 32                      # mach_header_64 is 32 bytes
+    cmds_end = off + sizeofcmds
+    sections, segments = [], []
+    for _ in range(ncmds):
+        if off + 8 > cmds_end:
+            break
+        cmd, cmdsize = struct.unpack_from("<II", buf, off)
+        if cmdsize < 8 or off + cmdsize > cmds_end:
+            break
+        if cmd == LC_SEGMENT_64:
+            segname = bytes(buf[off + 8:off + 24]).split(b"\0")[0].decode("ascii", "replace")
+            fileoff, filesize = struct.unpack_from("<QQ", buf, off + 40)
+            _maxprot, initprot, nsects, _flags = struct.unpack_from("<iiII", buf, off + 56)
+            if initprot & VM_PROT_EXECUTE and filesize:
+                segments.append((base + fileoff, base + fileoff + filesize, f"segment {segname}"))
+            sec = off + 72               # segment_command_64 is 72 bytes
+            for _i in range(nsects):     # section_64 is 80 bytes
+                sectname = bytes(buf[sec:sec + 16]).split(b"\0")[0].decode("ascii", "replace")
+                size, = struct.unpack_from("<Q", buf, sec + 40)
+                offset, = struct.unpack_from("<I", buf, sec + 48)
+                sflags, = struct.unpack_from("<I", buf, sec + 64)
+                if sflags & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS) and offset and size:
+                    sections.append((base + offset, base + offset + size, f"{segname},{sectname}"))
+                sec += 80
+        off += cmdsize
+    return sections or segments
+
+
+def _elf_exec_ranges(buf):
+    """Executable PT_LOAD segments (PF_X) of a 64-bit little-endian ELF, as
+    file ranges. Segment-level, so coarser than section-level (it includes
+    things like .plt next to .text) - but it works on files whose section
+    headers were stripped, which libil2cpp.so-style targets often are."""
+    e_phoff, = struct.unpack_from("<Q", buf, 0x20)
+    e_phentsize, e_phnum = struct.unpack_from("<HH", buf, 0x36)
+    ranges = []
+    for i in range(e_phnum):
+        p = e_phoff + i * e_phentsize
+        p_type, p_flags, p_offset, _vaddr, _paddr, p_filesz = struct.unpack_from("<IIQQQQ", buf, p)
+        if p_type == PT_LOAD and p_flags & PF_X and p_filesz:
+            ranges.append((p_offset, p_offset + p_filesz, f"PT_LOAD #{i} (flags 0x{p_flags:x})"))
+    return ranges
+
+
+def executable_ranges(buf):
+    """Where code can live in `buf` (bytes or an mmap of a whole binary).
+
+    Returns (format_name, [(start, end, label), ...]) with FILE offsets, or
+    None if the file isn't a recognised/well-formed Mach-O or ELF - callers
+    must treat that as "can't tell", not "no code". A fat Mach-O contributes
+    only its arm64 slices (an empty list if it has none)."""
+    try:
+        head = bytes(buf[:4])
+        if head == b"\x7fELF":
+            if buf[4] != 2 or buf[5] != 1:      # not ELFCLASS64 / ELFDATA2LSB
+                return None
+            return "ELF64", _elf_exec_ranges(buf)
+        if head == struct.pack("<I", MH_MAGIC_64):
+            return "Mach-O", _macho_exec_ranges(buf, 0)
+        magic, = struct.unpack(">I", head)
+        if magic in (FAT_MAGIC, FAT_MAGIC_64):
+            nfat, = struct.unpack_from(">I", buf, 4)
+            if nfat == 0 or nfat > 32:          # 0xcafebabe is also the Java class magic
+                return None
+            ranges = []
+            for i in range(nfat):
+                if magic == FAT_MAGIC:          # fat_arch: 5 x u32
+                    cputype, _sub, offset, _size, _align = struct.unpack_from(">iiIII", buf, 8 + 20 * i)
+                else:                           # fat_arch_64: cputype, sub, u64, u64, u32, u32
+                    cputype, _sub, offset, _size, _align, _res = struct.unpack_from(">iiQQII", buf, 8 + 32 * i)
+                if cputype != CPU_TYPE_ARM64:
+                    continue
+                if bytes(buf[offset:offset + 4]) != struct.pack("<I", MH_MAGIC_64):
+                    return None
+                ranges += _macho_exec_ranges(buf, offset)
+            return "fat Mach-O (arm64 slices)", ranges
+    except (struct.error, IndexError):
+        pass
+    return None
+
+
+# --------------------------------------------------------------------------
+# Candidate validation
+# --------------------------------------------------------------------------
+
+@dataclass
+class Check:
+    name: str
+    status: str     # "pass" | "fail" | "n/a"
+    detail: str
+
+
+@dataclass
+class Candidate:
+    match: int      # file offset of the fingerprint's first byte in the new build
+    offset: int     # match + len(fingerprint): the relocated hook offset
+    rejected: list = field(default_factory=list)   # hard-check failures; non-empty => discarded
+    checks: list = field(default_factory=list)
+    confidence: str = "n/a"                         # HIGH / MEDIUM / LOW, or "rejected"
+
+
+def _mnemonics(md, data, addr):
+    """Mnemonic (None if undecodable) of each whole 4-byte word in `data`,
+    which starts at `addr`. One word at a time, for the same reason as in
+    build_fingerprint: md.disasm() on a run stops silently at the first
+    undecodable word."""
+    out = []
+    for i in range(0, len(data) - len(data) % INSTR_LEN, INSTR_LEN):
+        insn = next(md.disasm(data[i:i + INSTR_LEN], addr + i), None)
+        out.append(insn.mnemonic if insn else None)
+    return out
+
+
+def _barrier_label(md, word, addr):
+    """The label of the instruction that ended a fingerprint run - its
+    mnemonic, or "<undecodable>" - or None if `word` is neither a barrier
+    (PC-relative / undecodable): then the run ended for another reason."""
+    insn = next(md.disasm(word, addr), None)
+    if insn is None:
+        return "<undecodable>"
+    return insn.mnemonic if is_pc_relative(insn) else None
+
+
+def _confidence(checks):
+    status = {c.name: c.status for c in checks}
+    soft_fails = [n for n, s in status.items()
+                  if s == "fail" and n in ("after-decode", "before-anchor", "after-similarity")]
+    if "after-decode" in soft_fails or len(soft_fails) >= 2:
+        return "LOW"
+    if (not soft_fails and status.get("executable-section") == "pass"
+            and status.get("after-similarity") == "pass"):
+        return "HIGH"
+    return "MEDIUM"
+
+
+def validate_candidates(old_path, old_offset, new_path, fingerprint, matches,
+                        context_words=CONTEXT_WORDS):
+    """Turn raw byte matches (start offsets in the new build, from
+    find_new_offset) into Candidates: hard checks decide `rejected`, soft
+    checks and the confidence label describe the rest. See the module
+    docstring for what each check is and why."""
+    if not matches:
+        return []
+    md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+    fp_len = len(fingerprint)
+    window = INSTR_LEN * context_words
+
+    # What the old build looked like around the hook point.
+    with open(old_path, "rb") as f:
+        f.seek(old_offset)
+        old_after = _mnemonics(md, f.read(window), old_offset)
+        old_anchor = None
+        fp_start = old_offset - fp_len
+        if fp_start >= INSTR_LEN:
+            f.seek(fp_start - INSTR_LEN)
+            old_anchor = _barrier_label(md, f.read(INSTR_LEN), fp_start - INSTR_LEN)
+
+    candidates = []
+    with open(new_path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        found = executable_ranges(mm)
+        for m in matches:
+            c = Candidate(match=m, offset=m + fp_len)
+
+            # -- hard: alignment ------------------------------------------
+            if m % INSTR_LEN:
+                c.rejected.append(
+                    f"match starts at 0x{m:x}, not on a {INSTR_LEN}-byte boundary - AArch64 "
+                    f"instructions can't start there, so this is data or a coincidence")
+            else:
+                c.checks.append(Check("alignment", "pass", f"0x{m:x} is {INSTR_LEN}-byte aligned"))
+
+            # -- hard: inside an executable region ---------------------------
+            region = None
+            if found is None:
+                c.checks.append(Check("executable-section", "n/a",
+                                      "file is not a recognised Mach-O/ELF - can't tell code from data"))
+            else:
+                fmt, ranges = found
+                region = next((r for r in ranges if r[0] <= m and c.offset + INSTR_LEN <= r[1]), None)
+                if region is None:
+                    where = next((r for r in ranges if r[0] <= m < r[1]), None)
+                    c.rejected.append(
+                        f"not inside an executable {fmt} region"
+                        + (f" (fingerprint/hook point run past the end of {where[2]})" if where
+                           else " - the bytes match, but in data or non-code"))
+                else:
+                    c.checks.append(Check("executable-section", "pass", f"inside {region[2]}"))
+
+            if c.rejected:
+                c.confidence = "rejected"
+                candidates.append(c)
+                continue
+
+            # -- soft: what follows the hook point ---------------------------
+            limit = region[1] if region else len(mm)
+            new_after = _mnemonics(md, mm[c.offset:min(c.offset + window, limit)], c.offset)
+            if not new_after:
+                c.checks.append(Check("after-decode", "n/a", "no words after the hook point to examine"))
+                c.checks.append(Check("after-similarity", "n/a", "no words after the hook point to compare"))
+            else:
+                bad_new, bad_old = new_after.count(None), old_after.count(None)
+                c.checks.append(Check(
+                    "after-decode", "pass" if bad_new <= bad_old else "fail",
+                    f"{len(new_after) - bad_new}/{len(new_after)} words after the hook point decode "
+                    f"(old build: {len(old_after) - bad_old}/{len(old_after)})"))
+                pairs = list(zip(old_after, new_after))
+                same = sum(1 for a, b in pairs if a is not None and a == b)
+                if pairs:
+                    ok = same / len(pairs) >= SIMILARITY_MIN
+                    c.checks.append(Check(
+                        "after-similarity", "pass" if ok else "fail",
+                        f"{same}/{len(pairs)} mnemonics after the hook point match the old build "
+                        f"(need >= {SIMILARITY_MIN:.0%})"))
+                else:
+                    c.checks.append(Check("after-similarity", "n/a", "nothing to compare in the old build"))
+
+            # -- soft: the barrier in front of the fingerprint ---------------
+            if old_anchor is None:
+                c.checks.append(Check("before-anchor", "n/a",
+                                      "the old run ended at the lookback window, not at a barrier"))
+            elif m < INSTR_LEN:
+                c.checks.append(Check("before-anchor", "n/a", "match is at the start of the file"))
+            else:
+                new_label = _barrier_label(md, bytes(mm[m - INSTR_LEN:m]), m - INSTR_LEN) or "<not a barrier>"
+                c.checks.append(Check(
+                    "before-anchor", "pass" if new_label == old_anchor else "fail",
+                    f"word before the fingerprint is {new_label} (old build: {old_anchor})"))
+
+            c.confidence = _confidence(c.checks)
+            candidates.append(c)
+    return candidates
+
+
+def print_checks(c, indent="      "):
+    for chk in c.checks:
+        print(f"{indent}[{chk.status:>4}] {chk.name}: {chk.detail}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("old_binary")
@@ -166,6 +466,9 @@ def main():
     ap.add_argument("new_binary")
     ap.add_argument("--min-instrs", type=int, default=4)
     ap.add_argument("--lookback", type=int, default=64)
+    ap.add_argument("--no-validate", action="store_true",
+                    help="skip the alignment / executable-section / context checks and accept a "
+                         "unique raw byte match (the pre-validation behaviour)")
     args = ap.parse_args()
 
     old_offset = args.old_offset
@@ -173,22 +476,47 @@ def main():
     try:
         fingerprint = build_fingerprint(args.old_binary, old_offset, args.min_instrs, args.lookback)
         matches = find_new_offset(args.new_binary, fingerprint)
+        print(f"\n[+] Matches found in the new build: {len(matches)}")
+        if args.no_validate:
+            print("[i] --no-validate: accepting raw byte matches without checking them.")
+            candidates = [Candidate(match=m, offset=m + len(fingerprint), confidence="unvalidated")
+                          for m in matches]
+        else:
+            candidates = validate_candidates(args.old_binary, old_offset, args.new_binary,
+                                             fingerprint, matches)
     except (RelocateError, OSError) as e:
         print(f"[!] {e}", file=sys.stderr)
         sys.exit(2)
 
-    print(f"\n[+] Matches found in the new build: {len(matches)}")
     if len(matches) == 0:
         print("[!] No matches - the code may have genuinely changed logic (not just moved).")
         sys.exit(1)
-    elif len(matches) > 1:
+
+    accepted = [c for c in candidates if not c.rejected]
+    for c in candidates:
+        if c.rejected:
+            print(f"      rejected 0x{c.offset:x}: {'; '.join(c.rejected)}")
+    if not args.no_validate:
+        print(f"[+] Surviving validation: {len(accepted)} of {len(matches)}")
+
+    if not accepted:
+        print("[!] Every byte match was rejected as not-code (see above) - the code may have "
+              "genuinely changed logic, or the executable-region parser misjudged this binary "
+              "(--no-validate skips the check).")
+        sys.exit(1)
+    elif len(accepted) > 1:
         print("[!] More than one match - the fingerprint isn't specific enough yet, try a higher --min-instrs or a larger --lookback.")
-        for m in matches:
-            print(f"      candidate: 0x{m + len(fingerprint):x}")
+        for c in accepted:
+            print(f"      candidate: 0x{c.offset:x}  (confidence: {c.confidence})")
+            print_checks(c, indent="          ")
         sys.exit(1)
     else:
-        new_offset = matches[0] + len(fingerprint)
-        print(f"\n[+] NEW OFFSET: 0x{new_offset:x}")
+        c = accepted[0]
+        print(f"\n[+] NEW OFFSET: 0x{c.offset:x}  (confidence: {c.confidence})")
+        print_checks(c, indent="    ")
+        if c.confidence == "LOW":
+            print("[!] LOW confidence - the bytes match but the surrounding code doesn't look like the "
+                  "old build's. Check this one in Ghidra before hooking it.")
 
 
 if __name__ == "__main__":
