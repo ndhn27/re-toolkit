@@ -22,9 +22,10 @@ Three jobs:
      --remote H:P   FRIDA_REMOTE_ADDR   REMOTE_ADDR
      --offset HEX   FRIDA_OFFSET        FRIDA_OFFSET
 
-     Offsets are always parsed as hex, with or without a 0x prefix (same
-     convention as relocate_offset.py and Ghidra's Symbol Table), so
-     `--offset ab68fc8` and `--offset 0xab68fc8` mean the same thing.
+     The offset is an RVA (Ghidra address with Image Base = 0), not a file
+     offset - see README.md's "RVA vs file offset". Offsets are always parsed
+     as hex, with or without a 0x prefix (the same parser relocate_offset.py
+     uses), so `--offset ab68fc8` and `--offset 0xab68fc8` mean the same thing.
 """
 import argparse
 import os
@@ -132,8 +133,14 @@ def load_agent_source(path, offset=None):
     file. No-op (with a note) if the agent doesn't declare a FRIDA_OFFSET at
     all — e.g. list_il2cpp_exports.js doesn't need one.
     """
-    with open(path, "r", encoding="utf-8") as f:
-        source = f.read()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            source = f.read()
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Agent not found: {path}. Run `npm run build` from the repo root "
+            f"to bundle scripts/ into dist/ (see README 'Building the agents')."
+        ) from None
 
     if offset is not None:
         source, n = re.subn(

@@ -1,22 +1,30 @@
 // dump_recommend_config_probe.js
 //
 // Exploratory probe used before the real layout of ExampleNamespace.DeviceRecommendConfig
-// was known - dumps the first 128 raw bytes of the record, plus the first
-// 128 bytes at any pointer-looking values found inside it, so the field
-// layout can be identified by eye. Same technique that worked for
-// DeviceQualityAllowList (see docs/MEMORY_LAYOUT.md).
+// was known - dumps the first 128 raw bytes of the record, plus 48 raw bytes
+// at every 8-byte slot whose value could be a pointer, so the field layout can
+// be identified by eye. Same technique that worked for DeviceQualityAllowList
+// (see docs/MEMORY_LAYOUT.md).
 //
-// Set FRIDA_OFFSET below before running (from Ghidra's Symbol Table, using
-// Image Base = 0). Build this with `npm run build` and run the bundled
+// The "possible pointer" lines are a heuristic, not a finding: a slot is listed
+// if its value is non-null and falls in a readable range, which an integer or
+// packed fields can do too, and nothing here knows what it points at
+// (System.String*, byte[]*, another record, ...). The bytes are shown raw, never
+// decoded. Confirm a candidate by reading it the way the real agent would
+// (readIl2CppString in _lib.js) before writing it into schema/layouts.json.
+//
+// Set FRIDA_OFFSET below before running to the RVA of ...$$unpack (from
+// Ghidra's Symbol Table, using Image Base = 0; an RVA, not a file offset - see
+// README.md's "RVA vs file offset"). Build this with `npm run build` and run the bundled
 // dist/dump_recommend_config_probe.js - see README.md's "Building the
 // agents" section.
 
 import { waitForModule, unpackFailed } from "./_lib.js";
 
-const FRIDA_OFFSET = 0x00000000; // <-- SET THIS
+const FRIDA_OFFSET = 0x0; // <-- SET THIS
 
 if (FRIDA_OFFSET === 0x0) {
-    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real offset before running.");
+    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real RVA before running.");
 }
 
 const RECORD_DUMP_SIZE = 0x80; // wider than the earlier probe - this struct has more fields
@@ -46,16 +54,18 @@ function installHook(mod) {
                 const bytes = rec.readByteArray(RECORD_DUMP_SIZE);
                 console.log(hexdump(bytes, { address: rec, length: RECORD_DUMP_SIZE }));
 
-                // Scan every 8-byte slot for anything that looks like a valid
-                // pointer (heuristic: falls inside a readable region), and if
-                // so dump 48 bytes there too - likely candidates for device
-                // name strings / CPU or GPU regex patterns.
+                // Scan every 8-byte slot for a value that could be a pointer
+                // (heuristic: non-null and inside a readable region) and dump 48
+                // raw bytes there too - candidates for device name strings /
+                // CPU or GPU regex patterns. Only candidates: see the header
+                // comment for why a hit doesn't prove it's a pointer, let alone
+                // a System.String*.
                 for (let off = 0; off < RECORD_DUMP_SIZE; off += 8) {
                     const val = rec.add(off).readPointer();
                     if (val.isNull()) continue;
                     const range = Process.findRangeByAddress(val);
                     if (range && range.protection.indexOf("r") !== -1) {
-                        console.log(`  --- candidate pointer at +0x${off.toString(16)} = ${val} (prot=${range.protection}) ---`);
+                        console.log(`  --- possible pointer at +0x${off.toString(16)} = ${val} (prot=${range.protection}, unverified) ---`);
                         try {
                             const sub = val.readByteArray(48);
                             console.log(hexdump(sub, { address: val, length: 48 }));

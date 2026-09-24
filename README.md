@@ -81,7 +81,7 @@ tests/      pytest unit tests for tools/relocate_offset.py (tiny in-memory
 | `scripts/dump_recommend_config.js` | Dumps `ExampleNamespace.DeviceRecommendConfig`: the full table of graphics presets per device tier. |
 | `scripts/dump_recommend_config_probe.js` | Generic raw-hex probe used to work out an unknown record layout by hand. |
 | `scripts/dump_selection_logic.js` | Hooks `GetConfigMatchingDevicePattern` / `GetRecommendedQualityPreset` directly, to watch the live selection algorithm instead of just reading static tables. |
-| `scripts/list_il2cpp_exports.js` | Lists `UnityFramework` exports/symbols — used to relocate `il2cpp_init` and other entry points in a build. |
+| `scripts/list_il2cpp_exports.js` | Lists `UnityFramework` exports/symbols — used to relocate `il2cpp_init` and other entry points in a build. Sends `{event: "scan-complete"}` when finished so `tools/list_exports.py` can detach as soon as the scan is done, instead of sleeping a fixed number of seconds. |
 | `scripts/_lib.js` | Shared helpers (`readRecord`, `readIl2CppString`, `waitForModule`, `createRecordStore`) used by the agents above — not a standalone agent on its own. |
 | `scripts/_layouts.js` | The record layouts the agents read with, **generated** from `schema/layouts.json` (`python tools/gen_layouts.py`) — don't edit by hand. |
 
@@ -93,14 +93,14 @@ This won't run against anything as-is — it's a worked example to copy the
 1. **Get the binary + metadata.** Pull the IL2CPP binary (`UnityFramework`
    on iOS, `libil2cpp.so` on Android) and generate `dump.cs` / a symbol
    map for it with an IL2CPP dumper, then load both into Ghidra.
-2. **Find your target function's offset.** Locate the class/method you
+2. **Find your target function's RVA.** Locate the class/method you
    care about in `dump.cs`, find its `...$$unpack` (or whatever function
    you're hooking) in Ghidra's Symbol Table, and note its address with
    Image Base set to `0` - that's the RVA the agents and `--offset` take.
-   (An RVA is not the same thing as a *file offset*: they coincide for a thin
-   Mach-O slice like `UnityFramework`, but not for a fat Mach-O or an ELF -
-   see the note on `tools/relocate_offset.py`, which works in file offsets.) `scripts/list_il2cpp_exports.js` can help locate
-   `il2cpp_init` and other entry points if the binary is stripped.
+   (An RVA is not a *file offset*, and `tools/relocate_offset.py` works in
+   file offsets - see "RVA vs file offset" below before mixing the two.)
+   `scripts/list_il2cpp_exports.js` can help locate `il2cpp_init` and other
+   entry points if the binary is stripped.
 3. **Work out the record layout.** Point a copy of
    `scripts/dump_recommend_config_probe.js` at your offset to hexdump raw
    records, then read the layout by eye — field sizes, string encoding,
@@ -117,17 +117,38 @@ This won't run against anything as-is — it's a worked example to copy the
    `createRecordStore` from `scripts/_lib.js` rather than re-copying them.
 5. **Build, then set your config and run.** Bundle the agents
    (`npm run build` — see "Building the agents" below), put your
-   package/bundle id and offset in `tools/config.py` (or pass them per run
+   package/bundle id and RVA in `tools/config.py` (or pass them per run
    — see Usage below), then use the driver
    scripts (or attach manually with the Frida CLI — see Usage below).
 6. **Carry offsets forward across updates.** When the app ships a new
    binary and offsets shift, `tools/relocate_offset.py` can re-locate a
    known offset in the new build via instruction fingerprinting, instead
-   of re-deriving it by hand in Ghidra every time. Each candidate is
+   of re-deriving it by hand in Ghidra every time. It takes and prints
+   *file* offsets, and says after each result whether that number can be
+   used as the RVA as is (thin Mach-O) or has to be converted first (ELF,
+   fat Mach-O). Each candidate is
    checked (alignment, inside an executable section, how the surrounding
    code compares to the old build) and reported with a HIGH/MEDIUM/LOW
    confidence - that is a sanity check around a byte fingerprint, not
    control-flow analysis, so verify the result once before trusting it.
+
+## RVA vs file offset
+
+"Offset" names two different numbers in this repo, and they are only
+sometimes equal:
+
+| | RVA | File offset |
+|---|---|---|
+| What it is | Address relative to the module's load address (a Ghidra address with Image Base = `0`); Frida hooks `module.base + RVA` | Byte position in the binary file on disk |
+| Used by | `FRIDA_OFFSET` / `OFFSET_*` in `scripts/*.js`, `FRIDA_OFFSET` in `tools/config.py`, `--offset` / `$FRIDA_OFFSET`, `meta.offset` in exported dumps | `tools/relocate_offset.py`: takes them in, prints them out |
+
+They coincide for code in a thin Mach-O slice such as the iOS
+`UnityFramework` (its `__TEXT` segment starts at file offset 0). They do not
+for a fat Mach-O (RVA = file offset minus the arch slice's offset, see `lipo
+-detailed_info`) or an ELF such as Android's `libil2cpp.so` (per-segment
+`p_offset` vs `p_vaddr`, see `readelf -lW`). Convert before handing a number
+from one side to the other: `relocate_offset.py` prints a note after every
+result saying which case it thinks it is, but it doesn't convert for you.
 
 ## Requirements
 
@@ -176,7 +197,7 @@ gen:layouts`) first so `scripts/_layouts.js` is regenerated before the build.
 1. Build the agents (see "Building the agents" above) — re-run after any
    edit to `scripts/*.js` or `scripts/_lib.js`.
 2. Set the target: put `TARGET` (your app's package/bundle id), `REMOTE_ADDR`
-   and `FRIDA_OFFSET` (the offset you found, see above) in `tools/config.py`
+   and `FRIDA_OFFSET` (the RVA you found, see above) in `tools/config.py`
    as your defaults. For one-off runs — especially when trying several
    offsets in a row while working out a layout — you can skip editing the
    file and override any of them from the command line or the environment
@@ -186,13 +207,15 @@ gen:layouts`) first so `scripts/_layouts.js` is regenerated before the build.
    | --- | --- | --- | --- |
    | `--target ID` | `FRIDA_TARGET` | `TARGET` | package/bundle id |
    | `--remote HOST:PORT` | `FRIDA_REMOTE_ADDR` | `REMOTE_ADDR` | frida-server address |
-   | `--offset HEX` | `FRIDA_OFFSET` | `FRIDA_OFFSET` | hex, `0x` optional (`ab68fc8` = `0xab68fc8`) |
+   | `--offset HEX` | `FRIDA_OFFSET` | `FRIDA_OFFSET` | RVA of the hooked function; hex, `0x` optional (`ab68fc8` = `0xab68fc8`) |
 
    Precedence is CLI flag > environment variable > `config.py`. Each driver
    prints the resolved value and where it came from at startup, so a stale
    `FRIDA_OFFSET` exported in your shell can't quietly win without you
-   seeing it. (`list_exports.py` takes `--target`/`--remote` only — it has
-   no offset.)
+   seeing it. (`list_exports.py` takes `--target`/`--remote`/`--wait` — it has
+   no offset. `--wait` is how long to wait for UnityFramework to load; the
+   agent sends `scan-complete` when it is done, so a fast scan detaches
+   immediately and a slow Unity boot can be given more time.)
 3. Either:
    - Run the matching driver in `tools/` (e.g. `python run_hd_quality_dump.py
      --offset 0xab68fc8`, from inside the `tools/` directory), which spawns
@@ -310,7 +333,9 @@ and the soft context checks that produce the HIGH/MEDIUM/LOW label.
 "Keeping real offsets out of git" above against fixture files,
 `test_layouts.py` checks the record-layout pipeline from "Record shapes"
 below (it runs the real agents under Node with a faked Frida, so it wants
-`node` on the PATH and skips itself without it), `test_common.py` covers the
+`node` on the PATH and skips itself without it), `test_terminology.py` keeps
+"RVA" (the hook address) and "file offset" (what `relocate_offset.py` works
+in) from being mixed up in comments and docs, `test_common.py` covers the
 CLI/env/`config.py` precedence and the `FRIDA_OFFSET` injection, and
 `test_run_hd_quality_dump.py` and `test_list_exports.py` pin the drivers'
 spawn/resume/detach lifecycle (shared via `_common.spawn_agent`) against a

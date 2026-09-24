@@ -6,8 +6,9 @@
 // docs/MEMORY_LAYOUT.md for the layout and how it was found. No offsets are
 // spelled out here.
 //
-// Set FRIDA_OFFSET before running (Symbol Table -> DeviceRecommendConfig
-// -> ...$$unpack -> Location column, using Image Base = 0). Build this
+// Set FRIDA_OFFSET to the RVA of ...$$unpack before running (Symbol Table ->
+// DeviceRecommendConfig -> ...$$unpack -> Location column, using Image Base
+// = 0; an RVA, not a file offset - see README.md's "RVA vs file offset"). Build this
 // with `npm run build` and run the bundled dist/dump_recommend_config.js
 // - see README.md's "Building the agents" section.
 
@@ -19,7 +20,7 @@ import { RecommendConfigRecordLayout } from "./_layouts.js";
 const FRIDA_OFFSET = 0x0; // <-- SET THIS: build-specific, find via Ghidra
 
 if (FRIDA_OFFSET === 0x0) {
-    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real offset " +
+    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real RVA " +
         "(or set config.FRIDA_OFFSET and run this via tools/run_hd_quality_dump.py) " +
         "before running. See docs/ITERATION_HISTORY.md for how to find it.");
 }

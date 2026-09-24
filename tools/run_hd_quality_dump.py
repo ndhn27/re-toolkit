@@ -17,7 +17,9 @@ The agent must be the *bundled* one under dist/, built with
 "Building the agents") - not scripts/ directly, which uses ES module
 imports that only resolve after bundling.
 
-TARGET, REMOTE_ADDR, and FRIDA_OFFSET default to the values in config.py, and
+TARGET, REMOTE_ADDR, and FRIDA_OFFSET (an RVA - the hooked function's Ghidra
+address with Image Base = 0, not a file offset; see README.md's "RVA vs file
+offset") default to the values in config.py, and
 can be overridden per run - which is what you want while probing offsets, so
 you don't have to edit a file between attempts:
 
@@ -143,7 +145,7 @@ def main():
     if settings.offset == 0:
         # Fail here rather than after spawning the app: the agent itself
         # refuses to hook at 0x0, so there's nothing useful to do with it.
-        sys.exit("[!] Offset is 0x0 - pass --offset, set $FRIDA_OFFSET, or set "
+        sys.exit("[!] RVA is 0x0 - pass --offset, set $FRIDA_OFFSET, or set "
                  "FRIDA_OFFSET in config.py. Not spawning the app.")
 
     if is_gitignored(args.out) is False:

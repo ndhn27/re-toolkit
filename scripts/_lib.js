@@ -14,7 +14,17 @@ import { Il2CppStringLayout } from "./_layouts.js";
  * sit is Il2CppStringLayout (generated from schema/layouts.json, see
  * docs/MEMORY_LAYOUT.md for how it was worked out): an int32 length, then
  * UTF-16LE characters, with no gap.
+ *
+ * MAX_STRING_LEN below is a runaway-read guard, not a real content limit: it
+ * only exists to stop a wrong `strPtr` (bad offset, stale pointer, a field
+ * misread as a string) from being misread as a string billions of units
+ * long and handed to readUtf16String(). A genuine IL2CPP string in this
+ * project's records should never come close to it - if one does, that's
+ * worth checking on its own merits, not a sign the bound needs to grow
+ * further.
  */
+const MAX_STRING_LEN = 65536; // UTF-16 units (128 KiB of UTF-16LE data)
+
 export function readIl2CppString(strPtr) {
     if (strPtr.isNull()) return null;
     let len;
@@ -23,7 +33,11 @@ export function readIl2CppString(strPtr) {
     } catch (e) {
         return `<read error: ${e.message}>`;
     }
-    if (len < 0 || len > 512) return `<unexpected len: ${len}>`;
+    if (len < 0 || len > MAX_STRING_LEN) {
+        console.log(`[!] readIl2CppString: rejected length ${len} at ${strPtr} ` +
+            `(cap is ${MAX_STRING_LEN} UTF-16 units) - treating as a bad read, not a real string`);
+        return `<unexpected len: ${len}>`;
+    }
     if (len === 0) return "";
     try {
         return strPtr.add(Il2CppStringLayout.charsOffset).readUtf16String(len);
@@ -79,9 +93,47 @@ export function readRecord(base, layout, only) {
 }
 
 /**
+ * True if Frida module `m` is the one named `moduleName`.
+ *
+ * `Module.name` is a "canonical name" and may be either the short name
+ * (`UnityFramework`) or a full path (`.../UnityFramework.framework/UnityFramework`).
+ * Matching only `m.name === moduleName` hangs forever on the path form.
+ */
+export function moduleMatches(m, moduleName) {
+    if (!m || !moduleName) return false;
+    if (m.name === moduleName) return true;
+    const base = (s) => {
+        const parts = String(s || "").split(/[/\\]/);
+        return parts[parts.length - 1] || "";
+    };
+    return base(m.name) === moduleName || base(m.path) === moduleName;
+}
+
+function findLoadedModule(moduleName) {
+    try {
+        return Process.getModuleByName(moduleName);
+    } catch (e) {
+        // Not under that exact name - fall through to a basename scan.
+    }
+    if (typeof Process.enumerateModules !== "function") return null;
+    try {
+        const list = Process.enumerateModules();
+        return list.find((m) => moduleMatches(m, moduleName)) || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
  * Run `onReady(module)` once `moduleName` is loaded in the target process
  * - immediately if it's already loaded when this is called, otherwise via
  * a one-shot module observer that detaches itself after firing.
+ *
+ * The observer is attached FIRST, then the already-loaded lookup runs.
+ * The other way around (lookup, then observer) races: the module can load
+ * in the gap and `onAdded` never fires for it, so the agent hangs forever.
+ * `onReady` is guarded so a sync `onAdded` for an already-resident module
+ * plus the immediate lookup cannot install the same hook twice.
  *
  * Every agent in this project waits on "UnityFramework" this way before
  * installing its hooks. That name is iOS-specific — this whole template
@@ -89,34 +141,46 @@ export function readRecord(base, layout, only) {
  * (see README.md); on Android you'd wait on "libil2cpp.so" instead, and
  * the record layouts below would need re-deriving for that build too.
  *
- * Only the *lookup* (`Process.getModuleByName`) is what "not loaded yet"
- * actually means, so only that call is wrapped in try/catch. `onReady`
- * runs outside it deliberately: if the module IS already loaded but
- * `onReady` itself throws (e.g. `Interceptor.attach` failing because of a
- * bad/misconfigured offset), that's a real error in the hook, not a
- * "wait for it to load" situation - `attachModuleObserver`'s `onAdded`
- * only fires for modules loaded *after* the observer is attached, so
- * treating that error as "not loaded yet" would silently swallow it and
- * hang forever waiting on an observer that can never fire, since the
- * module is already resident.
+ * `onReady` is allowed to throw (e.g. `Interceptor.attach` failing because
+ * of a bad/misconfigured offset). That is a real error in the hook, not a
+ * "wait for it to load" situation, and it must not be swallowed.
  */
 export function waitForModule(moduleName, onReady) {
-    let mod;
-    try {
-        mod = Process.getModuleByName(moduleName);
-    } catch (e) {
-        console.log(`[i] ${moduleName} not loaded yet - waiting for module observer...`);
-        const observer = Process.attachModuleObserver({
+    let done = false;
+    const fire = (m) => {
+        if (done) return;
+        done = true;
+        onReady(m);
+    };
+
+    let observer = null;
+    if (typeof Process.attachModuleObserver === "function") {
+        observer = Process.attachModuleObserver({
             onAdded(m) {
-                if (m.name === moduleName) {
-                    observer.detach();
-                    onReady(m);
-                }
+                if (!moduleMatches(m, moduleName)) return;
+                try { observer.detach(); } catch (e) { /* already detached */ }
+                fire(m);
             },
         });
+    }
+
+    const found = findLoadedModule(moduleName);
+    if (found) {
+        if (observer) {
+            try { observer.detach(); } catch (e) { /* already detached */ }
+        }
+        fire(found);
         return;
     }
-    onReady(mod);
+
+    if (observer) {
+        console.log(`[i] ${moduleName} not loaded yet - waiting for module observer...`);
+        return;
+    }
+    throw new Error(
+        `${moduleName} is not loaded, and Process.attachModuleObserver is unavailable. ` +
+        `Attach after the module is resident, or upgrade frida-server.`
+    );
 }
 
 /**

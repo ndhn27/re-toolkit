@@ -40,6 +40,9 @@ function scan(mod) {
     }
 
     console.log("[+] Scan complete. Script can exit now.");
+    if (typeof send === "function") {
+        send({ event: "scan-complete" });
+    }
 }
 
 waitForModule("UnityFramework", scan);

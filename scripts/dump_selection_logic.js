@@ -5,7 +5,8 @@
 // observed directly, without having to hand-read the decompiled code.
 //
 // Locate the RVAs for these two functions via static analysis (Image Base
-// = 0) and set them below. Build-specific — will need to be re-found for
+// = 0; RVAs, not file offsets - see README.md's "RVA vs file offset") and
+// set them below. Build-specific — will need to be re-found for
 // whatever binary you're targeting. Build this with `npm run build` and
 // run the bundled dist/dump_selection_logic.js - see README.md's
 // "Building the agents" section.
@@ -27,7 +28,7 @@ const OFFSET_GetRecommendedQualityPreset = 0x0; // <-- SET THIS
 
 if (OFFSET_GetConfigMatchingDevicePattern === 0x0 || OFFSET_GetRecommendedQualityPreset === 0x0) {
     throw new Error("OFFSET_GetConfigMatchingDevicePattern and/or OFFSET_GetRecommendedQualityPreset " +
-        "are still 0x0 - set both to your build's real offsets before running.");
+        "are still 0x0 - set both to your build's real RVAs before running.");
 }
 
 /**

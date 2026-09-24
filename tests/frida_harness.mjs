@@ -73,6 +73,14 @@ const dir = req.scriptsDir;
 const load = (name) => import(pathToFileURL(path.join(dir, name)).href);
 const respond = (obj) => process.stdout.write(JSON.stringify(obj));
 
+// The single JSON response is the only thing allowed on real stdout (Python
+// parses it verbatim - see run_harness()), so console.log is redirected for
+// EVERY mode, not just "agent": any code under tests/ - _lib.js included,
+// not just the agent entry points - may log, and a stray line would corrupt
+// the JSON the same way regardless of which mode triggered it.
+const log = [];
+console.log = (...a) => log.push(a.map(String).join(" "));
+
 if (req.mode === "info") {
     const lib = await load("_lib.js");
     respond({ readers: Object.keys(lib.FIELD_READERS) });
@@ -91,19 +99,36 @@ if (req.mode === "info") {
     respond(req.addrs.map((a) => lib.readIl2CppString(new Ptr(a))));
 } else if (req.mode === "agent") {
     const attached = [];
-    const log = [];
+    const already = req.moduleAlreadyLoaded !== false;
+    const loadedName = req.moduleName || "UnityFramework";
+    const loadedPath = req.modulePath || loadedName;
+    let observerCb = null;
     globalThis.Process = {
         getModuleByName(name) {
+            if (req.moduleByNameThrows || !already) {
+                throw new Error(`unable to find module: ${name}`);
+            }
             if (name !== "UnityFramework") throw new Error(`unable to find module: ${name}`);
-            return { name, base: new Ptr(0) };
+            return { name: loadedName, path: loadedPath, base: new Ptr(0) };
+        },
+        enumerateModules() {
+            if (!already) return [];
+            return [{ name: loadedName, path: loadedPath, base: new Ptr(0) }];
+        },
+        attachModuleObserver(hooks) {
+            observerCb = hooks.onAdded;
+            return { detach() { observerCb = null; } };
         },
     };
     globalThis.Interceptor = { attach: (addr, cb) => attached.push({ addr: addr.addr, cb }) };
     globalThis.rpc = {};
-    console.log = (...a) => log.push(a.map(String).join(" "));
+    globalThis.send = () => {};
 
     await load(req.agent);
 
+    if (!already && observerCb) {
+        observerCb({ name: loadedName, path: loadedPath, base: new Ptr(0) });
+    }
     for (const ev of req.events) {
         const { cb } = attached[ev.hook];
         const ctx = {};

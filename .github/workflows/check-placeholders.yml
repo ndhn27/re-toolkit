@@ -10,9 +10,11 @@ name: CI
 #    generate and decode). Runs on the oldest supported Python (3.9) and the
 #    latest 3.x.
 #  - build: `npm run build` (frida-compile) for every agent, so a broken
-#    import graph or bundling failure fails CI, plus a check that the two
-#    rpc agents' bundles still contain the exact `const FRIDA_OFFSET = 0x0;`
-#    line that tools/_common.py's load_agent_source() rewrites with a regex.
+#    import graph or bundling failure fails CI, plus a check that the RPC
+#    agents' (and the probe's) bundles still contain the exact
+#    `const FRIDA_OFFSET = 0x0;` line that tools/_common.py's
+#    load_agent_source() rewrites with a regex, and that the selection
+#    agent's OFFSET_* placeholders stay zero.
 on:
   push:
   pull_request:
@@ -72,9 +74,11 @@ jobs:
 
       - name: Bundles keep the injectable FRIDA_OFFSET line
         run: |
-          for f in dist/dump_hd_quality_list.js dist/dump_recommend_config.js; do
+          for f in dist/dump_hd_quality_list.js dist/dump_recommend_config.js dist/dump_recommend_config_probe.js; do
             grep -q 'const FRIDA_OFFSET = 0x0;' "$f" || {
               echo "::error file=$f::bundle no longer contains 'const FRIDA_OFFSET = 0x0;' - load_agent_source() would silently fail to inject the offset"
               exit 1
             }
           done
+          grep -q 'const OFFSET_GetConfigMatchingDevicePattern = 0x0;' dist/dump_selection_logic.js
+          grep -q 'const OFFSET_GetRecommendedQualityPreset = 0x0;' dist/dump_selection_logic.js

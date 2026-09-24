@@ -10,7 +10,7 @@ pinned here:
 
   - a failure anywhere before resume kills the still-suspended process,
     detaches the session if there is one, and the error still propagates;
-  - the happy path resumes, waits and detaches without killing anything;
+  - the happy path resumes, waits for scan-complete and detaches without killing anything;
   - Ctrl+C during the wait detaches and exits cleanly.
 
 Run from the repo root:
@@ -38,7 +38,7 @@ def driver(tmp_path, monkeypatch):
     agent = tmp_path / "list_il2cpp_exports.js"
     agent.write_text("// agent\n", encoding="utf-8")
     monkeypatch.setattr(module, "AGENT_PATH", str(agent))
-    monkeypatch.setattr(module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(module, "wait_for_scan", lambda _event, _timeout: True)
     monkeypatch.setattr(sys, "argv", [
         "list_exports.py", "--target", "com.example.app", "--remote", "127.0.0.1:1"])
 
@@ -108,10 +108,10 @@ def test_ctrl_c_during_wait_detaches_without_killing(driver, monkeypatch):
     session = FakeSession()
     device = install(session)
 
-    def interrupted(_s):
+    def interrupted(_event, _timeout):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(module.time, "sleep", interrupted)
+    monkeypatch.setattr(module, "wait_for_scan", interrupted)
     module.main()
 
     assert device.calls == ["spawn", "attach", "resume"]

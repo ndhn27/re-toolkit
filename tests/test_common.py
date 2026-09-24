@@ -204,3 +204,9 @@ def test_is_gitignored_none_outside_a_git_repo(tmp_path):
     # tmp_path has no .git anywhere above it (pytest's tmp dirs live under
     # /tmp) - git can't answer, so the driver must stay quiet, not warn.
     assert common.is_gitignored(tmp_path / "records.json") is None
+
+
+def test_load_agent_source_missing_file_explains_how_to_build(tmp_path):
+    missing = tmp_path / "dist" / "dump_hd_quality_list.js"
+    with pytest.raises(FileNotFoundError, match="npm run build"):
+        common.load_agent_source(missing)

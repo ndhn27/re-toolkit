@@ -35,8 +35,10 @@ How it works:
      Disassembling the fingerprint bytes themselves is deliberately not a
      check: they are the same bytes that were decoded in the old build, so
      the result would be the same by construction.
-  5. If exactly ONE candidate survives, print the new offset = match position
-     + fingerprint length, with the checks and the confidence label.
+  5. If exactly ONE candidate survives, print the new FILE offset = match
+     position + fingerprint length, with the checks and the confidence label,
+     then a note on whether that number can be used as the RVA (`--offset` /
+     FRIDA_OFFSET) as is or has to be converted first (see below).
      --no-validate skips step 4 (the raw behaviour: unique byte string =
      accepted) if the format parser misjudges an unusual binary.
 
@@ -54,7 +56,8 @@ two coincide for a thin Mach-O slice (its __TEXT segment starts at file offset
 do NOT coincide for a fat/universal Mach-O (add the arch slice's file offset)
 or for an ELF such as Android's `libil2cpp.so` (depends on the PT_LOAD
 segment's p_offset vs p_vaddr - check with `readelf -lW`). Convert first in
-those cases, in both directions.
+those cases, in both directions. The note printed after each result says which
+case the new build looks like; the tool does not do the conversion itself.
 
 Assumption: the algorithm/struct layout hasn't changed between the two
 builds, only the code has moved due to a rebuild (true for most
@@ -149,6 +152,8 @@ def is_pc_relative(insn):
 
 
 def build_fingerprint(old_path, old_offset, min_instrs, lookback_window=64):
+    if min_instrs < 1:
+        raise RelocateError(f"--min-instrs must be >= 1 (got {min_instrs}).")
     check_offset(old_path, old_offset)
     base = max(0, old_offset - lookback_window)
     if old_offset - base < INSTR_LEN:
@@ -241,7 +246,7 @@ def _macho_exec_ranges(buf, base):
                 size, = struct.unpack_from("<Q", buf, sec + 40)
                 offset, = struct.unpack_from("<I", buf, sec + 48)
                 sflags, = struct.unpack_from("<I", buf, sec + 64)
-                if sflags & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS) and offset and size:
+                if sflags & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS) and size:
                     sections.append((base + offset, base + offset + size, f"{segname},{sectname}"))
                 sec += 80
         off += cmdsize
@@ -292,8 +297,14 @@ def executable_ranges(buf):
                     cputype, _sub, offset, _size, _align, _res = struct.unpack_from(">iiQQII", buf, 8 + 32 * i)
                 if cputype != CPU_TYPE_ARM64:
                     continue
+                # A truncated or non-Mach-O slice is skipped, not treated as
+                # "this whole file is unrecognised" - otherwise a single bad
+                # slice would drop the executable-section hard check for the
+                # valid arm64 slice sitting next to it.
+                if offset < 0 or offset + 4 > len(buf):
+                    continue
                 if bytes(buf[offset:offset + 4]) != struct.pack("<I", MH_MAGIC_64):
-                    return None
+                    continue
                 ranges += _macho_exec_ranges(buf, offset)
             return "fat Mach-O (arm64 slices)", ranges
     except (struct.error, IndexError):
@@ -453,13 +464,41 @@ def validate_candidates(old_path, old_offset, new_path, fingerprint, matches,
     return candidates
 
 
+# What to tell the user about using a FILE offset in each kind of container as
+# an RVA (--offset / FRIDA_OFFSET), keyed by the format name executable_ranges()
+# returns (None: not a recognised Mach-O / ELF).
+_RVA_NOTES = {
+    "Mach-O": "[i] Thin Mach-O: this file offset is also the RVA (__TEXT starts at file offset 0) - "
+              "use it as --offset / FRIDA_OFFSET as is.",
+    "fat Mach-O (arm64 slices)": (
+        "[!] This is a FILE offset, not an RVA: in a fat Mach-O the RVA is this minus the arm64 "
+        "slice's file offset (`lipo -detailed_info`). --offset / FRIDA_OFFSET take the RVA."),
+    "ELF64": (
+        "[!] This is a FILE offset, not an RVA: in an ELF (e.g. libil2cpp.so) find the PT_LOAD segment "
+        "containing it (`readelf -lW`); the RVA is offset - p_offset + p_vaddr (Image Base 0). "
+        "--offset / FRIDA_OFFSET take the RVA."),
+    None: "[i] Unrecognised container format, so this can't tell whether the file offset equals the RVA "
+          "(it only does for a thin Mach-O slice). --offset / FRIDA_OFFSET take the RVA.",
+}
+
+
+def rva_note(path):
+    """One `[i]`/`[!]` line saying whether a FILE offset in the binary at `path`
+    can be passed to `--offset` / FRIDA_OFFSET (which take an RVA) unchanged."""
+    with open(path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        found = executable_ranges(mm)
+    return _RVA_NOTES[found[0] if found else None]
+
+
 def print_checks(c, indent="      "):
     for chk in c.checks:
         print(f"{indent}[{chk.status:>4}] {chk.name}: {chk.detail}")
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="Re-locate a hook point in a new build. Offsets here are FILE offsets, "
+                    "not the RVAs that --offset / FRIDA_OFFSET take - see the module docstring.")
     ap.add_argument("old_binary")
     ap.add_argument("old_offset", type=parse_offset,
                     help="FILE offset in old_binary, hex, e.g. 0xab68fc8 (see module docstring)")
@@ -495,7 +534,7 @@ def main():
     accepted = [c for c in candidates if not c.rejected]
     for c in candidates:
         if c.rejected:
-            print(f"      rejected 0x{c.offset:x}: {'; '.join(c.rejected)}")
+            print(f"      rejected file offset 0x{c.offset:x}: {'; '.join(c.rejected)}")
     if not args.no_validate:
         print(f"[+] Surviving validation: {len(accepted)} of {len(matches)}")
 
@@ -507,13 +546,14 @@ def main():
     elif len(accepted) > 1:
         print("[!] More than one match - the fingerprint isn't specific enough yet, try a higher --min-instrs or a larger --lookback.")
         for c in accepted:
-            print(f"      candidate: 0x{c.offset:x}  (confidence: {c.confidence})")
+            print(f"      candidate file offset: 0x{c.offset:x}  (confidence: {c.confidence})")
             print_checks(c, indent="          ")
         sys.exit(1)
     else:
         c = accepted[0]
-        print(f"\n[+] NEW OFFSET: 0x{c.offset:x}  (confidence: {c.confidence})")
+        print(f"\n[+] NEW FILE OFFSET: 0x{c.offset:x}  (confidence: {c.confidence})")
         print_checks(c, indent="    ")
+        print(rva_note(args.new_binary))
         if c.confidence == "LOW":
             print("[!] LOW confidence - the bytes match but the surrounding code doesn't look like the "
                   "old build's. Check this one in Ghidra before hooking it.")

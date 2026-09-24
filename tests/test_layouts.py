@@ -298,20 +298,34 @@ def test_js_rejects_a_subset_naming_a_missing_field(node_scripts):
 
 
 def test_js_string_reader_edge_cases(node_scripts):
+    # MAX_STRING_LEN in scripts/_lib.js - keep in sync with the value there.
+    # It's a runaway-read guard (misread pointer/offset), not a real content
+    # limit, so this test also proves a genuinely long, valid string (well
+    # past the *old* 512 cap this bound replaced) still decodes correctly -
+    # that's the actual regression being covered here.
+    max_string_len = 65536
+
     image = Image()
     length_at = SCHEMA["string"]["length_offset"]
     ok, empty = image.put_string("h\u00e9llo"), image.put_string("")
     negative, huge = image.put_string("x"), image.put_string("x")
     struct.pack_into("<i", image.mem, negative + length_at, -1)
-    struct.pack_into("<i", image.mem, huge + length_at, 513)
+    struct.pack_into("<i", image.mem, huge + length_at, max_string_len + 1)
+    # Longer than the old 512-unit cap, comfortably under the new one, with
+    # real UTF-16 content behind it (not just a poked length field like
+    # `huge` above) - this is the case that used to come back as
+    # "<unexpected len: 1000>" before the cap was raised.
+    long_valid_text = "y" * 1000
+    long_valid = image.put_string(long_valid_text)
     got = run_harness(node_scripts, image.mem, mode="string",
-                      addrs=[0, ok, empty, negative, huge, IMAGE_SIZE + 0x100])
+                      addrs=[0, ok, empty, negative, huge, long_valid, IMAGE_SIZE + 0x100])
     assert got[0] is None
     assert got[1] == "h\u00e9llo"
     assert got[2] == ""
     assert got[3] == "<unexpected len: -1>"
-    assert got[4] == "<unexpected len: 513>"
-    assert got[5].startswith("<read error")
+    assert got[4] == f"<unexpected len: {max_string_len + 1}>"
+    assert got[5] == long_valid_text
+    assert got[6].startswith("<read error")
 
 
 def test_a_wrong_reader_would_be_caught(node_scripts, tmp_path):
@@ -390,3 +404,30 @@ def test_selection_agent_prints_only_the_subset(node_scripts):
     assert json.loads(re.search(r"-> (\{.*\})", log).group(1)) == expected
     finals = re.findall(r"FINAL RESULT: (\{.*\}|NULL) =====", log)
     assert [json.loads(f) if f != "NULL" else None for f in finals] == [expected, None]
+
+
+def test_rpc_agent_installs_after_the_module_observer_fires(node_scripts):
+    image = Image()
+    expected = image.put_record("DeviceQualityRecord", RECORD_BASE)
+    out = run_harness(
+        node_scripts, image.mem, mode="agent",
+        agent=RECORDS["DeviceQualityRecord"]["agent"],
+        moduleAlreadyLoaded=False,
+        events=_record_events(1),
+    )
+    assert out["rpc"] == {"count": 1, "records": [expected]}
+    assert any("not loaded yet" in line for line in out["log"])
+
+
+def test_rpc_agent_matches_module_by_basename_when_name_is_a_path(node_scripts):
+    image = Image()
+    expected = image.put_record("DeviceQualityRecord", RECORD_BASE)
+    out = run_harness(
+        node_scripts, image.mem, mode="agent",
+        agent=RECORDS["DeviceQualityRecord"]["agent"],
+        moduleByNameThrows=True,
+        moduleName="/var/containers/Bundle/UnityFramework",
+        modulePath="/var/containers/Bundle/UnityFramework",
+        events=_record_events(1),
+    )
+    assert out["rpc"] == {"count": 1, "records": [expected]}

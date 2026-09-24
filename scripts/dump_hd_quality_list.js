@@ -8,8 +8,10 @@
 // docs/MEMORY_LAYOUT.md for the layout and the investigation behind it. No
 // offsets are spelled out here.
 //
-// Usage: set FRIDA_OFFSET to the file offset of the unpack function (from
-// Ghidra's Symbol Table, using Image Base = 0), then build this with
+// Usage: set FRIDA_OFFSET to the RVA of the unpack function - its address in
+// Ghidra's Symbol Table with Image Base = 0, i.e. relative to the module's
+// load address (NOT a file offset; see README.md's "RVA vs file offset") -
+// then build this with
 // `npm run build` and run the bundled dist/dump_hd_quality_list.js with
 // Frida against a running instance of the game. See README.md's
 // "Building the agents" section.
@@ -22,7 +24,7 @@ import { DeviceQualityRecordLayout } from "./_layouts.js";
 const FRIDA_OFFSET = 0x0; // <-- SET THIS: build-specific, find via Ghidra
 
 if (FRIDA_OFFSET === 0x0) {
-    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real offset " +
+    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real RVA " +
         "(or set config.FRIDA_OFFSET and run this via tools/run_hd_quality_dump.py) " +
         "before running. See docs/ITERATION_HISTORY.md for how to find it.");
 }

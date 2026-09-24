@@ -245,6 +245,13 @@ class TestBuildFingerprint:
         assert fp == pack(SAFE4)
         assert "from 0x0 to 0x10" in capsys.readouterr().out
 
+    def test_min_instrs_below_one_raises_before_indexing(self, tmp_path):
+        path = write_bin(tmp_path, SAFE4 + [NOP])
+        with pytest.raises(ro.RelocateError, match="min-instrs must be >= 1"):
+            ro.build_fingerprint(path, 16, min_instrs=0)
+        with pytest.raises(ro.RelocateError, match="min-instrs must be >= 1"):
+            ro.build_fingerprint(path, 16, min_instrs=-1)
+
     def test_lookback_smaller_than_one_instruction_raises(self, tmp_path):
         path = write_bin(tmp_path, SAFE4 + [NOP])
 
@@ -385,7 +392,7 @@ def test_relocates_after_code_moved_and_pc_relative_targets_changed(tmp_path, mo
 
     assert code == 0
     assert "Matches found in the new build: 1" in out
-    assert "NEW OFFSET: 0x%x" % ((10 + 2 + len(SAFE_RUN)) * 4) in out
+    assert "NEW FILE OFFSET: 0x%x" % ((10 + 2 + len(SAFE_RUN)) * 4) in out
 
 
 def test_relocating_a_build_onto_itself_returns_the_same_offset(tmp_path, monkeypatch, capsys):
@@ -394,7 +401,7 @@ def test_relocating_a_build_onto_itself_returns_the_same_offset(tmp_path, monkey
     code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), old)
 
     assert code == 0
-    assert "NEW OFFSET: 0x%x" % OLD_OFFSET in out
+    assert "NEW FILE OFFSET: 0x%x" % OLD_OFFSET in out
 
 
 def test_exits_1_when_code_genuinely_changed(tmp_path, monkeypatch, capsys):
@@ -407,7 +414,7 @@ def test_exits_1_when_code_genuinely_changed(tmp_path, monkeypatch, capsys):
 
     assert code == 1
     assert "No matches" in out
-    assert "NEW OFFSET" not in out
+    assert "NEW FILE OFFSET" not in out
 
 
 def test_exits_1_and_lists_candidates_when_fingerprint_is_ambiguous(tmp_path, monkeypatch, capsys):
@@ -421,9 +428,9 @@ def test_exits_1_and_lists_candidates_when_fingerprint_is_ambiguous(tmp_path, mo
 
     assert code == 1
     assert "More than one match" in out
-    assert "candidate: 0x%x" % OLD_OFFSET in out
-    assert "candidate: 0x%x" % second_copy_end in out
-    assert "NEW OFFSET" not in out
+    assert "candidate file offset: 0x%x" % OLD_OFFSET in out
+    assert "candidate file offset: 0x%x" % second_copy_end in out
+    assert "NEW FILE OFFSET" not in out
 
 
 # --------------------------------------------------------------------------
@@ -544,6 +551,34 @@ def test_fat_macho_without_an_arm64_slice_has_no_code_ranges():
     assert ro.executable_ranges(blob) == ("fat Mach-O (arm64 slices)", [])
 
 
+def test_fat_skips_a_truncated_arm64_slice_instead_of_giving_up():
+    # A garbage first slice used to make executable_ranges() return None for
+    # the whole file, which skipped the executable-section hard check.
+    arm, arm_lay = build_macho([("__TEXT", 5, [("__text", CODE, b"\x11" * 64)])], CPU_ARM64)
+    blob, offs = build_fat([(CPU_ARM64, b"not-a-macho"), (CPU_ARM64, arm)])
+
+    fmt, ranges = ro.executable_ranges(blob)
+
+    start, end = arm_lay["__TEXT,__text"]
+    assert fmt == "fat Mach-O (arm64 slices)"
+    assert ranges == [(offs[1] + start, offs[1] + end, "__TEXT,__text")]
+
+
+def test_macho_instruction_section_at_file_offset_zero_is_kept():
+    # `and offset` used to drop a PURE_INSTRUCTIONS section whose file offset
+    # is 0 (falsy). Patch the first section_64.offset to 0 and require it to
+    # still appear. mach_header_64 (32) + segment_command_64 (72) + 48 = 152.
+    blob, _ = build_macho([("__TEXT", 5, [("__text", CODE, b"\x11" * 64)])])
+    patched = bytearray(blob)
+    struct.pack_into("<I", patched, 152, 0)
+
+    fmt, ranges = ro.executable_ranges(patched)
+
+    assert fmt == "Mach-O"
+    assert ranges[0][0] == 0
+    assert ranges[0][2] == "__TEXT,__text"
+
+
 def test_elf_returns_only_executable_load_segments():
     blob, spans = build_elf64([(1, 4, b"\x11" * 32),       # PT_LOAD  R
                                (1, 5, b"\x22" * 64),       # PT_LOAD  R X
@@ -612,8 +647,8 @@ def test_main_rejecting_every_match_exits_1_and_says_why(tmp_path, monkeypatch, 
 
     assert code == 1
     assert "Matches found in the new build: 1" in out
-    assert "Surviving validation: 0 of 1" in out and "rejected 0x" in out
-    assert "NEW OFFSET" not in out
+    assert "Surviving validation: 0 of 1" in out and "rejected file offset 0x" in out
+    assert "NEW FILE OFFSET" not in out
 
 
 def test_byte_match_in_a_data_section_is_rejected_and_the_code_match_survives(tmp_path, monkeypatch, capsys):
@@ -633,7 +668,7 @@ def test_byte_match_in_a_data_section_is_rejected_and_the_code_match_survives(tm
     assert code == 0
     assert "Matches found in the new build: 2" in out
     assert "Surviving validation: 1 of 2" in out
-    assert "NEW OFFSET: 0x%x" % expected in out
+    assert "NEW FILE OFFSET: 0x%x" % expected in out
     assert "not inside an executable Mach-O region" in out
 
 
@@ -662,7 +697,7 @@ def test_match_only_in_data_exits_1(tmp_path, monkeypatch, capsys):
     code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
 
     assert code == 1
-    assert "Surviving validation: 0 of 1" in out and "NEW OFFSET" not in out
+    assert "Surviving validation: 0 of 1" in out and "NEW FILE OFFSET" not in out
 
 
 def test_match_whose_hook_point_falls_outside_the_section_is_rejected(tmp_path):
@@ -745,5 +780,57 @@ def test_successful_main_prints_the_confidence_and_the_checks(tmp_path, monkeypa
     code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
 
     assert code == 0
-    assert "NEW OFFSET: 0x%x  (confidence: HIGH)" % (lay["__TEXT,__text"][0] + HOOK_OFFSET_IN_NEW_TEXT) in out
+    assert "NEW FILE OFFSET: 0x%x  (confidence: HIGH)" % (lay["__TEXT,__text"][0] + HOOK_OFFSET_IN_NEW_TEXT) in out
     assert "executable-section: inside __TEXT,__text" in out
+
+
+# --------------------------------------------------------------------------
+# main(): the result is a FILE offset - say whether it can be used as an RVA
+# --------------------------------------------------------------------------
+
+def _new_build_in(kind):
+    """The relocated code wrapped in each kind of container ->
+    (blob, expected FILE offset of the hook point)."""
+    words = pack(NEW_TEXT_WORDS)
+    if kind == "raw":
+        return words, HOOK_OFFSET_IN_NEW_TEXT
+    if kind == "fat":
+        thin, lay = build_macho([("__TEXT", 5, [("__text", CODE, words)])])
+        blob, slice_offsets = build_fat([(CPU_ARM64, thin)])
+        return blob, slice_offsets[0] + lay["__TEXT,__text"][0] + HOOK_OFFSET_IN_NEW_TEXT
+    if kind == "elf":
+        blob, spans = build_elf64([(1, 5, words)])
+        return blob, spans[0][0] + HOOK_OFFSET_IN_NEW_TEXT
+    blob, lay = build_macho([("__TEXT", 5, [("__text", CODE, words)])])
+    return blob, lay["__TEXT,__text"][0] + HOOK_OFFSET_IN_NEW_TEXT
+
+
+@pytest.mark.parametrize("kind, phrases", [
+    ("macho", ["also the RVA", "as is"]),
+    ("fat", ["FILE offset, not an RVA", "lipo"]),
+    ("elf", ["FILE offset, not an RVA", "readelf", "p_vaddr"]),
+    ("raw", ["Unrecognised container", "can't tell"]),
+])
+def test_result_says_whether_the_file_offset_is_also_the_rva(tmp_path, monkeypatch, capsys, kind, phrases):
+    blob, expected = _new_build_in(kind)
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, blob, "new.bin")
+
+    code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
+
+    assert code == 0
+    assert "NEW FILE OFFSET: 0x%x" % expected in out
+    for phrase in phrases:
+        assert phrase in out, phrase
+    # Only a thin Mach-O gets the green light; every other case must not.
+    assert ("use it as --offset / FRIDA_OFFSET as is" in out) == (kind == "macho")
+
+
+def test_no_note_is_printed_when_there_is_no_result(tmp_path, monkeypatch, capsys):
+    old = write_bin(tmp_path, OLD_WORDS, "old.bin")
+    new = write_blob(tmp_path, pack([NOP] * 16), "new.bin")
+
+    code, out = run_main(monkeypatch, capsys, old, hex(OLD_OFFSET), new)
+
+    assert code == 1
+    assert "RVA" not in out
