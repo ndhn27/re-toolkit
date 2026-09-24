@@ -110,13 +110,7 @@ PC_RELATIVE_CASES = [
     pytest.param(LDRSW_LIT, "ldrsw", id="ldrsw-literal"),
     pytest.param(LDR_LIT_D, "ldr", id="ldr-literal-simd-d"),
     pytest.param(LDR_LIT_Q, "ldr", id="ldr-literal-simd-q"),
-    pytest.param(
-        PRFM_LIT, "prfm", id="prfm-literal",
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason="known gap: literal prfm is PC-relative but not detected "
-                   "(compilers practically never emit it). Remove this marker "
-                   "if is_pc_relative() ever learns about it.")),
+    pytest.param(PRFM_LIT, "prfm", id="prfm-literal"),
 ]
 
 
@@ -145,6 +139,7 @@ NOT_PC_RELATIVE_CASES = [
     pytest.param(0xF8696900, "ldr", id="ldr-reg-offset"),          # ldr x0, [x8, x9]
     pytest.param(LDR_REG, "ldr", id="ldr-reg-offset-shifted"),     # ldr x0, [x8, x9, lsl #3]
     pytest.param(0xB9800500, "ldrsw", id="ldrsw-base-imm"),        # ldrsw x0, [x8, #4]
+    pytest.param(0xF9800000, "prfm", id="prfm-base-imm"),          # prfm pldl1keep, [x0]
     pytest.param(0xF85F8100, "ldur", id="ldur"),                   # ldur x0, [x8, #-8]
     pytest.param(LDP, "ldp", id="ldp"),
     pytest.param(0xA9BF7BFD, "stp", id="stp-pre-index"),           # stp x29, x30, [sp, #-0x10]!

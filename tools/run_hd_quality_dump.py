@@ -48,10 +48,19 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import frida
 
 from _common import add_override_args, load_agent_source, resolve_settings
+
+if TYPE_CHECKING:
+    # Only needed to resolve the type comment on `recs` below - guarding it
+    # this way keeps the import out of the runtime path entirely (unlike a
+    # bare `noqa: F401`, which only silences the linter but still executes
+    # the import). Some pyflakes versions still flag names that are only
+    # referenced in a `# type:` comment, hence the noqa staying here too.
+    from records import DeviceQualityRecord, RecommendConfigRecord  # noqa: F401
 
 AGENT_PATH = "../dist/dump_hd_quality_list.js"
 OUT_PATH = "records.json"
@@ -108,7 +117,12 @@ def main():
     try:
         count = script.exports_sync.get_count()
         print(f"[*] Collected {count} unique records. Exporting...")
-        recs = script.exports_sync.get_records()
+        # Shape depends on which agent was loaded (--agent above): a list of
+        # DeviceQualityRecord for dump_hd_quality_list.js, or
+        # RecommendConfigRecord for dump_recommend_config.js - see
+        # tools/records.py. Not asserted/validated at runtime, same as the
+        # rest of this RPC round-trip - just documents what to expect.
+        recs = script.exports_sync.get_records()  # type: list[DeviceQualityRecord] | list[RecommendConfigRecord]
         output = {
             "meta": {
                 "target": settings.target,

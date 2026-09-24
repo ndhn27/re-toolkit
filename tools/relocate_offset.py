@@ -31,18 +31,26 @@ import sys
 import argparse
 from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
 
-PC_RELATIVE = {"adrp", "adr", "bl", "b", "cbz", "cbnz", "tbz", "tbnz", "b.eq",
-               "b.ne", "b.gt", "b.lt", "b.ge", "b.le", "ldr"}  # the literal-pool form of ldr can also be PC-relative
 INSTR_LEN = 4  # AArch64: every instruction is a fixed 4 bytes
 
 
 def is_pc_relative(insn):
+    """True if `insn`'s encoding depends on its own address, so it can't be
+    reused as-is once the surrounding code moves.
+
+    This is the single source of truth for that classification (see
+    test_relocate_offset.py's is_pc_relative_* tests) - don't duplicate the
+    mnemonic list elsewhere as a plain set/tuple; a previous such constant
+    here went unused and, worse, was wrong (missed most b.<cond> variants
+    and couldn't tell literal-pool ldr from base-register ldr - the exact
+    distinction handled below)."""
     if insn.mnemonic in ("adrp", "adr", "bl", "cbz", "cbnz", "tbz", "tbnz"):
         return True
     if insn.mnemonic == "b" or insn.mnemonic.startswith("b."):
         return True
-    # "ldr xN, #imm" (literal pool) is PC-relative; "ldr wN, [xM, #imm]" is not.
-    if insn.mnemonic in ("ldr", "ldrsw") and "[" not in insn.op_str:
+    # "ldr xN, #imm" / "prfm <prfop>, #imm" (literal pool) is PC-relative;
+    # "ldr wN, [xM, #imm]" / "prfm <prfop>, [xM, #imm]" is not.
+    if insn.mnemonic in ("ldr", "ldrsw", "prfm") and "[" not in insn.op_str:
         return True
     return False
 

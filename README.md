@@ -51,12 +51,17 @@ tools/      Python drivers that spawn/attach via frida-tools and drive the
             bundled agents in dist/
             (config.py holds the default target/offset; override per run
             with --target/--remote/--offset or env vars — not by editing
-            the drivers)
+            the drivers. records.py holds the TypedDict schemas for the
+            records those drivers pull over RPC — see "Record shapes"
+            below.)
 legacy/     Earlier, superseded versions of dump_hd_quality_list.js, kept
             for reference — see docs/ITERATION_HISTORY.md
 docs/       Struct layout notes and the debugging history
 tests/      pytest unit tests for tools/relocate_offset.py (tiny in-memory
-            AArch64 fixtures - no device or real binary needed)
+            AArch64 fixtures - no device or real binary needed) and for
+            tools/check_placeholders.py
+.githooks/  pre-commit hook wired to tools/check_placeholders.py - see
+            "Keeping real offsets out of git" below
 ```
 
 | Script | Purpose |
@@ -190,6 +195,33 @@ edit to `scripts/*.js` or `scripts/_lib.js`.
 (See step 6 of "Adapting this template" above for carrying an offset
 forward when the app updates.)
 
+## Keeping real offsets out of git
+
+The placeholders described above (`com.example.unitygame`, `FRIDA_OFFSET =
+0x0`, etc.) only stay placeholders if nobody forgets to reset them before
+committing. Beyond the runtime `if (OFFSET === 0x0) throw ...` guards
+already in `scripts/*.js` — which only catch it at *run* time, and only for
+whoever runs it — `tools/check_placeholders.py` checks the same two things
+(`scripts/*.js` / `legacy/*.js` offset constants, and `tools/config.py`'s
+`TARGET` / `FRIDA_OFFSET`) *before* a real value can land in git history:
+
+- **Locally**, as a pre-commit hook. Install once per clone (from the repo
+  root):
+
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
+- **In CI**, via `.github/workflows/check-placeholders.yml`, which runs the
+  same script on every push/PR — a backstop for a clone that never
+  installed the hook, or a commit made with `--no-verify`.
+
+Both call `tools/check_placeholders.py` directly, so there's one source of
+truth; see that file's docstring for exactly what it checks (and, just as
+importantly, what it doesn't — a renamed class/namespace like
+`ExampleNamespace` isn't caught, since there's no fixed placeholder string
+to diff it against).
+
 ## Tests
 
 `tools/relocate_offset.py` is the trickiest logic in the repo (backward
@@ -206,6 +238,34 @@ What's covered: which instructions count as PC-relative (`is_pc_relative`),
 how `build_fingerprint` picks the safe run in front of the offset (barrier
 instructions, undecodable words, `--min-instrs`, `--lookback`, start/end of
 file) and how `find_new_offset` / `main` behave with 0, 1 and several matches.
+
+`tests/` also covers two smaller things, both dependency-free (no capstone
+needed): `test_check_placeholders.py` exercises the pre-commit/CI check
+from "Keeping real offsets out of git" above against fixture files, and
+`test_records_schema.py` diffs the JSDoc/`TypedDict` record shapes from
+"Record shapes" below against each other.
+
+## Record shapes
+
+Both "dump the whole table" agents (`dump_hd_quality_list.js`,
+`dump_recommend_config.js`) hand back plain JS objects over RPC, and the
+Python drivers in `tools/` receive them as plain `dict`s in turn — nothing
+enforces a shape on either side at runtime. For a reader trying to figure
+out what fields to expect without digging through `docs/MEMORY_LAYOUT.md`,
+each record's shape is documented as a JSDoc `@typedef` right next to
+where it's built:
+
+| Record | JSDoc typedef | Python `TypedDict` |
+|---|---|---|
+| `ExampleNamespace.DeviceQualityAllowList` entry | `DeviceQualityRecord` in `scripts/dump_hd_quality_list.js` | `DeviceQualityRecord` in `tools/records.py` |
+| `ExampleNamespace.DeviceRecommendConfig` entry | `RecommendConfigRecord` in `scripts/dump_recommend_config.js` | `RecommendConfigRecord` in `tools/records.py` |
+| 5-field subset of the above, from the live selection hooks | `SelectionResult` in `scripts/dump_selection_logic.js` | *(none — see `records.py`'s docstring)* |
+
+These are documentation, not enforcement — this project has no
+TS/`checkJs` build step and nothing runs mypy/pyright over `records.py` —
+but `tests/test_records_schema.py` does diff the JS `@typedef` fields
+against the matching Python `TypedDict` on every test run, so the two
+sides can't silently drift apart the way a comment easily could.
 
 ## Findings
 

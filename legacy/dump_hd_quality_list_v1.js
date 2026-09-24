@@ -16,6 +16,11 @@
 
 const FRIDA_OFFSET = 0x0; // <-- SET THIS: build-specific, find via Ghidra
 
+if (FRIDA_OFFSET === 0x0) {
+    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real offset " +
+        "before running. See docs/ITERATION_HISTORY.md for how to find it.");
+}
+
 function main() {
     let mod;
     try {

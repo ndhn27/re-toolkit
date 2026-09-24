@@ -18,7 +18,12 @@
  */
 export function readIl2CppString(strPtr) {
     if (strPtr.isNull()) return null;
-    const len = strPtr.add(0x08).readS32();
+    let len;
+    try {
+        len = strPtr.add(0x08).readS32();
+    } catch (e) {
+        return `<read error: ${e.message}>`;
+    }
     if (len < 0 || len > 512) return `<unexpected len: ${len}>`;
     if (len === 0) return "";
     try {
@@ -57,10 +62,31 @@ export function waitForModule(moduleName, onReady) {
 }
 
 /**
+ * The shape every "dump the whole table" agent's record store is generic
+ * over - `T` is filled in per-agent (see the `DeviceQualityRecord` typedef
+ * in dump_hd_quality_list.js, `RecommendConfigRecord` in
+ * dump_recommend_config.js). Plain documentation only - this project has no
+ * TS/checkJs build step, so nothing enforces these at build time; they're
+ * here so a reader (or an editor's JSDoc-aware IntelliSense) can see the
+ * record shape without cross-referencing docs/MEMORY_LAYOUT.md by hand.
+ *
+ * @template T
+ * @typedef {Object} RecordStore
+ * @property {Map<number, T>} records - accumulated records, keyed by their numeric id
+ * @property {{getCount: () => number, getRecords: () => T[], clear: () => boolean}} rpcExports
+ *   - exposed as `rpc.exports` so the Python drivers in tools/ can pull the
+ *   accumulated table over RPC (see tools/records.py for the Python-side
+ *   mirror of each per-agent T)
+ */
+
+/**
  * An id -> record `Map`, plus the matching rpc.exports (getCount /
  * getRecords / clear) that every "dump the whole table" agent
  * (dump_hd_quality_list.js, dump_recommend_config.js) exposes so the
  * Python drivers in tools/ can pull the accumulated table over RPC.
+ *
+ * @template T
+ * @returns {RecordStore<T>}
  */
 export function createRecordStore() {
     const records = new Map();

@@ -1,0 +1,36 @@
+name: CI
+
+# Two independent checks on every push/PR:
+#  - check-placeholders: backstop for people who never ran
+#    `git config core.hooksPath .githooks`, or who committed with
+#    --no-verify - see tools/check_placeholders.py for what's checked.
+#  - tests: the pytest suite in tests/ - including the fixtures that
+#    exercise check_placeholders.py itself, which previously only ran
+#    locally, never in CI.
+on:
+  push:
+  pull_request:
+
+jobs:
+  check-placeholders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify no real offsets/targets were committed
+        run: python3 tools/check_placeholders.py
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: pytest

@@ -4,6 +4,15 @@ Findings from instrumenting `UnityFramework` in this build with Frida.
 These are build-specific and will need to be re-verified against any new
 build (offsets in particular will drift — see `tools/relocate_offset.py`).
 
+> For a quick field-by-field reference rather than the full narrative
+> below, see the `DeviceQualityRecord` / `RecommendConfigRecord` /
+> `SelectionResult` JSDoc `@typedef` blocks in the matching
+> `scripts/*.js` files, and `tools/records.py`'s `TypedDict`s (the Python
+> mirror of the first two — see that file's docstring for why
+> `SelectionResult` has no Python-side equivalent). This file stays useful
+> for *how* those layouts were worked out — see `ITERATION_HISTORY.md` for
+> that process end to end.
+
 ## IL2CPP object header
 
 Standard IL2CPP objects normally have a 16-byte header (`klass` pointer +

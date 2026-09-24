@@ -15,13 +15,13 @@ function scan(mod) {
     console.log("[+] Total exports:", exports.length);
 
     let matches = exports.filter((e) => e.name.toLowerCase().includes("il2cpp_init"));
-    console.log("[+] Exports exactly matching 'il2cpp_init':", JSON.stringify(matches, null, 2));
+    console.log("[+] Exports containing 'il2cpp_init':", JSON.stringify(matches, null, 2));
 
     if (matches.length === 0) {
         const broader = exports
             .filter((e) => e.name.toLowerCase().includes("il2cpp"))
             .slice(0, 80);
-        console.log("[+] No exact match. First 80 exports containing 'il2cpp':");
+        console.log("[+] No match containing 'il2cpp_init'. First 80 exports containing 'il2cpp':");
         console.log(JSON.stringify(broader, null, 2));
     }
 

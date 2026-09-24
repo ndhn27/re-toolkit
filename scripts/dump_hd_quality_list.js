@@ -26,6 +26,22 @@
 
 import { readIl2CppString, waitForModule, createRecordStore } from "./_lib.js";
 
+/**
+ * One entry of ExampleNamespace.DeviceQualityAllowList, as read from a
+ * hooked `...$$unpack` call. Field offsets are the OFFSETS table below
+ * (source of truth); cross-checked against docs/MEMORY_LAYOUT.md, which
+ * also has the investigation history behind how they were found.
+ *
+ * @typedef {Object} DeviceQualityRecord
+ * @property {number} id - numeric record id (OFFSETS.id, uint32)
+ * @property {number} enabled - HD render quality on/off flag
+ *   (OFFSETS.enabled, int8 - observed as 0 or 1)
+ * @property {string|null} name - device name/identifier (OFFSETS.namePtr,
+ *   a System.String*); null if the pointer itself was null, or a `<...>`
+ *   placeholder string if readIl2CppString hit an unexpected length or a
+ *   read error - see readIl2CppString in _lib.js
+ */
+
 const FRIDA_OFFSET = 0x0; // <-- SET THIS: build-specific, find via Ghidra
 
 if (FRIDA_OFFSET === 0x0) {
@@ -40,7 +56,7 @@ const OFFSETS = {
     namePtr: 0x20,
 };
 
-const { records, rpcExports } = createRecordStore();
+const { records, rpcExports } = /** @type {import("./_lib.js").RecordStore<DeviceQualityRecord>} */ (createRecordStore());
 
 function installHook(mod) {
     const addr = mod.base.add(FRIDA_OFFSET);
@@ -60,8 +76,11 @@ function installHook(mod) {
                 const namePtr = rec.add(OFFSETS.namePtr).readPointer();
                 const name = readIl2CppString(namePtr);
 
+                /** @type {DeviceQualityRecord} */
+                const record = { id, enabled, name };
+
                 const isNew = !records.has(id);
-                records.set(id, { id, enabled, name });
+                records.set(id, record);
 
                 // Only log on a brand-new id - avoids spamming re-sent
                 // records (the server may push the whole table again).

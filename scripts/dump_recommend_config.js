@@ -10,6 +10,43 @@
 
 import { readIl2CppString, waitForModule, createRecordStore } from "./_lib.js";
 
+/**
+ * One entry of ExampleNamespace.DeviceRecommendConfig, as read from a
+ * hooked `...$$unpack` call. Field offsets are inline in onLeave below
+ * (source of truth), and match docs/MEMORY_LAYOUT.md's
+ * "DeviceRecommendConfig record" section - see that file for the
+ * investigation history behind them.
+ *
+ * dump_selection_logic.js's `SelectionResult` typedef documents a 5-field
+ * subset of this same record, read via a different pair of hooked
+ * functions that return a pointer to one of these records directly.
+ *
+ * @typedef {Object} RecommendConfigRecord
+ * @property {number} id - numeric record id (+0x08, uint32)
+ * @property {number} type - record type discriminator (+0x0c, uint32)
+ * @property {number} paramMin1 - (+0x18, int32)
+ * @property {number} paramMax1 - (+0x1c, int32)
+ * @property {number} paramMin2 - (+0x20, int32)
+ * @property {number} paramMax2 - (+0x24, int32)
+ * @property {number} paramMin3 - (+0x28, int32)
+ * @property {number} paramMax3 - (+0x2c, int32)
+ * @property {number} deviceLevel - (+0x30, uint32)
+ * @property {number} supportsFPS60 - (+0x34, uint32 - observed as a 0/1 flag)
+ * @property {number} supportsParticleHD - (+0x38, uint32 - observed as a 0/1 flag)
+ * @property {number} recommendGraphicMode - (+0x3c, uint32)
+ * @property {number} renderQualityPerfMode - (+0x40, uint32)
+ * @property {number} particleQualityPerfMode - (+0x44, uint32)
+ * @property {number} resolutionPerfMode - (+0x48, uint32)
+ * @property {number} fpsPerfMode - (+0x4c, uint32)
+ * @property {number} renderQualityGraphicMode - (+0x50, uint32)
+ * @property {number} particleQualityGraphicMode - (+0x54, uint32)
+ * @property {number} resolutionGraphicMode - (+0x58, uint32)
+ * @property {number} fpsGraphicMode - (+0x5c, uint32)
+ * @property {string|null} szConfig - (+0x60, System.String*) - graphics
+ *   preset name; null/`<...>` on a null pointer or read error, same as
+ *   DeviceQualityRecord.name - see readIl2CppString in _lib.js
+ */
+
 const FRIDA_OFFSET = 0x0; // <-- SET THIS: build-specific, find via Ghidra
 
 if (FRIDA_OFFSET === 0x0) {
@@ -18,7 +55,7 @@ if (FRIDA_OFFSET === 0x0) {
         "before running. See docs/ITERATION_HISTORY.md for how to find it.");
 }
 
-const { records, rpcExports } = createRecordStore();
+const { records, rpcExports } = /** @type {import("./_lib.js").RecordStore<RecommendConfigRecord>} */ (createRecordStore());
 
 function installHook(mod) {
     const addr = mod.base.add(FRIDA_OFFSET);
@@ -34,6 +71,7 @@ function installHook(mod) {
             const rec = this.recordPtr;
             try {
                 const id = rec.add(0x08).readU32();
+                /** @type {RecommendConfigRecord} */
                 const rec_data = {
                     id: id,
                     type: rec.add(0x0c).readU32(),
