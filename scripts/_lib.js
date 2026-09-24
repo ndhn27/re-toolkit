@@ -7,30 +7,75 @@
 // scripts/ directly; the raw files here use ES module imports and won't
 // load as-is.
 
+import { Il2CppStringLayout } from "./_layouts.js";
+
 /**
- * Read an IL2CPP System.String at `strPtr`.
- *
- * Layout confirmed experimentally (see docs/MEMORY_LAYOUT.md for the full
- * investigation history):
- *   +0x00 : klass (8 bytes)
- *   +0x08 : length (int32, NOT padded to 8 bytes)
- *   +0x0C : UTF-16LE characters, starting immediately, no gap
+ * Read an IL2CPP System.String at `strPtr`. Where its length and characters
+ * sit is Il2CppStringLayout (generated from schema/layouts.json, see
+ * docs/MEMORY_LAYOUT.md for how it was worked out): an int32 length, then
+ * UTF-16LE characters, with no gap.
  */
 export function readIl2CppString(strPtr) {
     if (strPtr.isNull()) return null;
     let len;
     try {
-        len = strPtr.add(0x08).readS32();
+        len = strPtr.add(Il2CppStringLayout.lengthOffset).readS32();
     } catch (e) {
         return `<read error: ${e.message}>`;
     }
     if (len < 0 || len > 512) return `<unexpected len: ${len}>`;
     if (len === 0) return "";
     try {
-        return strPtr.add(0x0c).readUtf16String(len);
+        return strPtr.add(Il2CppStringLayout.charsOffset).readUtf16String(len);
     } catch (e) {
         return `<read error: ${e.message}>`;
     }
+}
+
+/**
+ * How each schema field `type` (schema/layouts.json) is read at an address.
+ * This is the only place that decides what "u32" or "s8" means at runtime,
+ * and tests/test_layouts.py decodes every type here against an independent
+ * Python decoder, so changing e.g. `u32` to `readS8()` fails a test instead
+ * of silently corrupting every dump. Keep the keys equal to TYPES in
+ * tools/gen_layouts.py (also tested).
+ */
+export const FIELD_READERS = {
+    u32: (p) => p.readU32(),
+    s32: (p) => p.readS32(),
+    s8: (p) => p.readS8(),
+    string: (p) => readIl2CppString(p.readPointer()),
+};
+
+/**
+ * Read a record at `base` field by field according to `layout` (one of the
+ * `*Layout` tables in _layouts.js). If `only` is given it must name fields of
+ * `layout` and just those are read - dump_selection_logic.js uses that for
+ * its 5-field subset. Result keys follow layout (offset) order.
+ *
+ * Throws if a field's read throws (e.g. an unreadable address), on a
+ * `type` FIELD_READERS doesn't know, or if `only` names a field that isn't
+ * in `layout` - callers already wrap the read in try/catch.
+ *
+ * @param {NativePointer} base
+ * @param {import("./_layouts.js").FieldSpec[]} layout
+ * @param {string[]} [only]
+ * @returns {Object<string, number|string|null>}
+ */
+export function readRecord(base, layout, only) {
+    if (only) {
+        const known = new Set(layout.map((f) => f.name));
+        const missing = only.filter((n) => !known.has(n));
+        if (missing.length) throw new Error(`readRecord: no such field(s): ${missing.join(", ")}`);
+    }
+    const fields = only ? layout.filter((f) => only.includes(f.name)) : layout;
+    const rec = {};
+    for (const f of fields) {
+        const read = FIELD_READERS[f.type];
+        if (!read) throw new Error(`readRecord: unknown field type "${f.type}" (${f.name})`);
+        rec[f.name] = read(base.add(f.offset));
+    }
+    return rec;
 }
 
 /**

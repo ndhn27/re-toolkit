@@ -10,25 +10,17 @@
 // run the bundled dist/dump_selection_logic.js - see README.md's
 // "Building the agents" section.
 
-import { readIl2CppString, waitForModule } from "./_lib.js";
+import { readIl2CppString, readRecord, waitForModule } from "./_lib.js";
+import { RecommendConfigRecordLayout, SelectionResultFields } from "./_layouts.js";
 
-/**
- * Both hooked functions below return a pointer to a full
- * ExampleNamespace.DeviceRecommendConfig record (see the
- * `RecommendConfigRecord` typedef in dump_recommend_config.js for the
- * complete field layout) - but readConfigResult() here only reads the 5
- * fields that are actually useful to watch live. Field offsets must match
- * dump_recommend_config.js's exactly, since it's the same underlying
- * struct; docs/MEMORY_LAYOUT.md's "DeviceRecommendConfig record" section is
- * the shared source of truth for both.
- *
- * @typedef {Object} SelectionResult
- * @property {number} id - (+0x08, uint32)
- * @property {number} type - (+0x0c, uint32)
- * @property {number} deviceLevel - (+0x30, uint32)
- * @property {number} fpsGraphicMode - (+0x5c, uint32)
- * @property {string|null} szConfig - (+0x60, System.String*)
- */
+/** @typedef {import("./_layouts.js").SelectionResult} SelectionResult */
+
+// Both hooked functions below return a pointer to a full
+// ExampleNamespace.DeviceRecommendConfig record, but only the few fields in
+// SelectionResultFields (schema/layouts.json's `SelectionResult` subset) are
+// worth watching live. They're read with the same layout as
+// dump_recommend_config.js - it's the same underlying struct, so there is
+// nothing to keep in sync by hand.
 
 const OFFSET_GetConfigMatchingDevicePattern = 0x0; // <-- SET THIS
 const OFFSET_GetRecommendedQualityPreset = 0x0; // <-- SET THIS
@@ -47,13 +39,7 @@ if (OFFSET_GetConfigMatchingDevicePattern === 0x0 || OFFSET_GetRecommendedQualit
 function readConfigResult(ptr) {
     if (ptr.isNull()) return null;
     try {
-        return /** @type {SelectionResult} */ ({
-            id: ptr.add(0x08).readU32(),
-            type: ptr.add(0x0c).readU32(),
-            deviceLevel: ptr.add(0x30).readU32(),
-            fpsGraphicMode: ptr.add(0x5c).readU32(),
-            szConfig: readIl2CppString(ptr.add(0x60).readPointer()),
-        });
+        return /** @type {SelectionResult} */ (readRecord(ptr, RecommendConfigRecordLayout, SelectionResultFields));
     } catch (e) {
         return `<error reading result: ${e.message}>`;
     }

@@ -1,0 +1,60 @@
+{
+  "$comment": "Single source of truth for record layouts: where each field lives (offset), how it is read (type) and what it means. scripts/_layouts.js, tools/records.py and the offset listings in docs/MEMORY_LAYOUT.md are GENERATED from this file - edit here, then run `python tools/gen_layouts.py` (tests/test_layouts.py fails if they are stale). Types: u32, s32, s8, string (System.String*). Build-specific: re-verify on any new build.",
+  "headerSize": 8,
+  "il2cppString": {
+    "lengthOffset": "0x08",
+    "charsOffset": "0x0c"
+  },
+  "records": {
+    "DeviceQualityRecord": {
+      "description": "One entry of ExampleNamespace.DeviceQualityAllowList, as read from a hooked `...$$unpack` call.",
+      "agent": "dump_hd_quality_list.js",
+      "fields": [
+        { "name": "id", "offset": "0x08", "type": "u32", "doc": "numeric record id" },
+        { "name": "enabled", "offset": "0x18", "type": "s8", "doc": "HD render quality on/off flag (observed as 0 or 1)" },
+        { "name": "name", "offset": "0x20", "type": "string", "doc": "device name/identifier" }
+      ],
+      "unread": [
+        { "name": "szName_ByteArray", "offset": "0x10", "size": 8, "doc": "byte[]* - observed NULL every time and unused in practice; the real name is the System.String in `name`." }
+      ]
+    },
+    "RecommendConfigRecord": {
+      "description": "One entry of ExampleNamespace.DeviceRecommendConfig, as read from a hooked `...$$unpack` call.",
+      "agent": "dump_recommend_config.js",
+      "fields": [
+        { "name": "id", "offset": "0x08", "type": "u32", "doc": "numeric record id" },
+        { "name": "type", "offset": "0x0c", "type": "u32", "doc": "record type discriminator" },
+        { "name": "paramMin1", "offset": "0x18", "type": "s32", "doc": "" },
+        { "name": "paramMax1", "offset": "0x1c", "type": "s32", "doc": "" },
+        { "name": "paramMin2", "offset": "0x20", "type": "s32", "doc": "" },
+        { "name": "paramMax2", "offset": "0x24", "type": "s32", "doc": "" },
+        { "name": "paramMin3", "offset": "0x28", "type": "s32", "doc": "" },
+        { "name": "paramMax3", "offset": "0x2c", "type": "s32", "doc": "" },
+        { "name": "deviceLevel", "offset": "0x30", "type": "u32", "doc": "" },
+        { "name": "supportsFPS60", "offset": "0x34", "type": "u32", "doc": "observed as a 0/1 flag" },
+        { "name": "supportsParticleHD", "offset": "0x38", "type": "u32", "doc": "observed as a 0/1 flag" },
+        { "name": "recommendGraphicMode", "offset": "0x3c", "type": "u32", "doc": "" },
+        { "name": "renderQualityPerfMode", "offset": "0x40", "type": "u32", "doc": "" },
+        { "name": "particleQualityPerfMode", "offset": "0x44", "type": "u32", "doc": "" },
+        { "name": "resolutionPerfMode", "offset": "0x48", "type": "u32", "doc": "" },
+        { "name": "fpsPerfMode", "offset": "0x4c", "type": "u32", "doc": "" },
+        { "name": "renderQualityGraphicMode", "offset": "0x50", "type": "u32", "doc": "" },
+        { "name": "particleQualityGraphicMode", "offset": "0x54", "type": "u32", "doc": "" },
+        { "name": "resolutionGraphicMode", "offset": "0x58", "type": "u32", "doc": "" },
+        { "name": "fpsGraphicMode", "offset": "0x5c", "type": "u32", "doc": "" },
+        { "name": "szConfig", "offset": "0x60", "type": "string", "doc": "graphics preset name" }
+      ],
+      "unread": [
+        { "name": "unidentified", "offset": "0x10", "size": 8, "doc": "8-byte region the investigation never resolved; not read by any agent. It is 8-aligned and sits before the first int32 run, which is consistent with a pointer field, but nothing here confirms that - treat it as unknown until you read it on your own build." }
+      ]
+    }
+  },
+  "subsets": {
+    "SelectionResult": {
+      "of": "RecommendConfigRecord",
+      "agent": "dump_selection_logic.js",
+      "description": "The fields of RecommendConfigRecord that dump_selection_logic.js watches live. Both functions it hooks return a pointer to a full DeviceRecommendConfig record; only these fields are read.",
+      "fields": ["id", "type", "deviceLevel", "fpsGraphicMode", "szConfig"]
+    }
+  }
+}

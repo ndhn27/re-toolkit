@@ -5,8 +5,10 @@ name: CI
 #    `git config core.hooksPath .githooks`, or who committed with
 #    --no-verify - see tools/check_placeholders.py for what's checked.
 #  - tests: the pytest suite in tests/ - including the fixtures that
-#    exercise check_placeholders.py itself. Runs on the oldest supported
-#    Python (3.9) and the latest 3.x.
+#    exercise check_placeholders.py itself and the layout tests that run the
+#    agents under Node (schema/layouts.json vs what scripts/ and tools/
+#    generate and decode). Runs on the oldest supported Python (3.9) and the
+#    latest 3.x.
 #  - build: `npm run build` (frida-compile) for every agent, so a broken
 #    import graph or bundling failure fails CI, plus a check that the two
 #    rpc agents' bundles still contain the exact `const FRIDA_OFFSET = 0x0;`
@@ -36,8 +38,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Node runs the real agents against a fake process image in
+      # tests/test_layouts.py; with $CI set those tests fail, not skip,
+      # if `node` is missing.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install test dependencies
         run: pip install -r requirements-dev.txt
+
+      - name: Generated layout files are up to date
+        run: python tools/gen_layouts.py --check
 
       - name: Run pytest
         run: pytest

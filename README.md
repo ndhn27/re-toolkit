@@ -60,14 +60,17 @@ tools/      Python drivers that spawn/attach via frida-tools and drive the
             (config.py holds the default target/offset; override per run
             with --target/--remote/--offset or env vars — not by editing
             the drivers. records.py holds the TypedDict schemas for the
-            records those drivers pull over RPC — see "Record shapes"
-            below.)
+            records those drivers pull over RPC — generated, see "Record
+            shapes" below.)
+schema/     layouts.json: the ONE place a record's field offsets and types
+            are written down — see "Record shapes" below.
 legacy/     Earlier, superseded versions of dump_hd_quality_list.js, kept
             for reference — see docs/ITERATION_HISTORY.md
 docs/       Struct layout notes and the debugging history
 tests/      pytest unit tests for tools/relocate_offset.py (tiny in-memory
-            AArch64 fixtures - no device or real binary needed) and for
-            tools/check_placeholders.py
+            AArch64 fixtures - no device or real binary needed), for
+            tools/check_placeholders.py, and for the record-layout pipeline
+            (schema/ -> scripts/_layouts.js, tools/records.py, docs/)
 .githooks/  pre-commit hook wired to tools/check_placeholders.py - see
             "Keeping real offsets out of git" below
 ```
@@ -79,7 +82,8 @@ tests/      pytest unit tests for tools/relocate_offset.py (tiny in-memory
 | `scripts/dump_recommend_config_probe.js` | Generic raw-hex probe used to work out an unknown record layout by hand. |
 | `scripts/dump_selection_logic.js` | Hooks `GetConfigMatchingDevicePattern` / `GetRecommendedQualityPreset` directly, to watch the live selection algorithm instead of just reading static tables. |
 | `scripts/list_il2cpp_exports.js` | Lists `UnityFramework` exports/symbols — used to relocate `il2cpp_init` and other entry points in a build. |
-| `scripts/_lib.js` | Shared helpers (`readIl2CppString`, `waitForModule`, `createRecordStore`) used by the agents above — not a standalone agent on its own. |
+| `scripts/_lib.js` | Shared helpers (`readRecord`, `readIl2CppString`, `waitForModule`, `createRecordStore`) used by the agents above — not a standalone agent on its own. |
+| `scripts/_layouts.js` | The record layouts the agents read with, **generated** from `schema/layouts.json` (`python tools/gen_layouts.py`) — don't edit by hand. |
 
 ## Adapting this template to your own target
 
@@ -103,10 +107,13 @@ This won't run against anything as-is — it's a worked example to copy the
    and (per `docs/MEMORY_LAYOUT.md`) don't assume the standard IL2CPP
    object header size, it varies by build. `docs/ITERATION_HISTORY.md`
    walks through this process end to end, wrong guesses included.
-4. **Write your hook.** Once the layout is confirmed, adapt
+4. **Write your hook.** Once the layout is confirmed, write it into
+   `schema/layouts.json` (field name, offset, type) and run
+   `python tools/gen_layouts.py`; then adapt
    `scripts/dump_hd_quality_list.js` / `dump_recommend_config.js` — same
-   `Interceptor.attach` + field-offset pattern, just with your own offsets
-   and field names. Reuse `readIl2CppString` / `waitForModule` /
+   `Interceptor.attach` + `readRecord(ptr, <Record>Layout)` pattern, just
+   with your own record. The agents never contain field offsets themselves.
+   Reuse `readRecord` / `readIl2CppString` / `waitForModule` /
    `createRecordStore` from `scripts/_lib.js` rather than re-copying them.
 5. **Build, then set your config and run.** Bundle the agents
    (`npm run build` — see "Building the agents" below), put your
@@ -160,7 +167,9 @@ This writes one bundled file per agent to `dist/` (e.g.
 `dist/dump_hd_quality_list.js`) — point Frida or the drivers in `tools/` at
 that, not at the files in `scripts/` directly. Re-run `npm run build` (or
 e.g. `npm run watch:hd-quality-list` for just that one agent) after any
-edit to `scripts/*.js` or `scripts/_lib.js`.
+edit to `scripts/*.js` or `scripts/_lib.js`. If you changed
+`schema/layouts.json`, run `python tools/gen_layouts.py` (or `npm run
+gen:layouts`) first so `scripts/_layouts.js` is regenerated before the build.
 
 ## Usage
 
@@ -238,9 +247,11 @@ value can land in git history:
   address (a literal of `0x10000` or more, in code, in a string, in a
   comment, in a table, however it's written), plus any `offset`/RVA-named
   constant (`FRIDA_OFFSET`, `OFFSET_GetFoo`, `HOOK_RVA`, ...) that isn't a
-  zero placeholder. The struct-field table (`const OFFSETS = { ... }`) is
-  still allowed to live in git, but every entry has to be `0x1000` or less;
-  tables must be named `*Offsets`.
+  zero placeholder. Struct-field offsets live in `schema/layouts.json` and
+  the `scripts/_layouts.js` generated from it: `tools/gen_layouts.py`
+  rejects any offset above `0x1000` in the schema, and a hand-written JS
+  table is still allowed if it's named `*Offsets` and every entry is
+  `0x1000` or less.
 - **`tools/config.py`**: `TARGET` must be `"com.example.unitygame"` and
   `FRIDA_OFFSET` must be zero, however they're written (type hints,
   tuple-unpacking, line breaks, ...).
@@ -262,8 +273,9 @@ It runs in two places:
 - **In CI**, via `.github/workflows/check-placeholders.yml`, which runs the
   same script on every push/PR — a backstop for a clone that never
   installed the hook, or a commit made with `--no-verify`. The same
-  workflow also runs `pytest` (Python 3.9 and the latest 3.x) and a full
-  `npm run build`, checking that the two RPC agents' bundles still contain
+  workflow also runs `pytest` (Python 3.9 and the latest 3.x, with Node
+  installed so the layout tests that execute the agents run too — they fail
+  rather than skip in CI) and a full `npm run build`, checking that the two RPC agents' bundles still contain
   the `const FRIDA_OFFSET = 0x0;` line the driver rewrites.
 
 Both call `tools/check_placeholders.py` directly, so there's one source of
@@ -293,11 +305,12 @@ alignment, "is this match inside an executable section?" for thin/fat
 Mach-O and ELF64 containers (built in memory by `tests/binfmt_fixtures.py`),
 and the soft context checks that produce the HIGH/MEDIUM/LOW label.
 
-`tests/` also covers smaller things, all dependency-free (no capstone or
-Frida needed): `test_check_placeholders.py` exercises the pre-commit/CI
-check from "Keeping real offsets out of git" above against fixture files,
-`test_records_schema.py` diffs the JSDoc/`TypedDict` record shapes from
-"Record shapes" below against each other, `test_common.py` covers the
+`tests/` also covers smaller things, none needing capstone or Frida:
+`test_check_placeholders.py` exercises the pre-commit/CI check from
+"Keeping real offsets out of git" above against fixture files,
+`test_layouts.py` checks the record-layout pipeline from "Record shapes"
+below (it runs the real agents under Node with a faked Frida, so it wants
+`node` on the PATH and skips itself without it), `test_common.py` covers the
 CLI/env/`config.py` precedence and the `FRIDA_OFFSET` injection, and
 `test_run_hd_quality_dump.py` and `test_list_exports.py` pin the drivers'
 spawn/resume/detach lifecycle (shared via `_common.spawn_agent`) against a
@@ -305,25 +318,28 @@ stubbed `frida` module.
 
 ## Record shapes
 
-Both "dump the whole table" agents (`dump_hd_quality_list.js`,
-`dump_recommend_config.js`) hand back plain JS objects over RPC, and the
-Python drivers in `tools/` receive them as plain `dict`s in turn — nothing
-enforces a shape on either side at runtime. For a reader trying to figure
-out what fields to expect without digging through `docs/MEMORY_LAYOUT.md`,
-each record's shape is documented as a JSDoc `@typedef` right next to
-where it's built:
+A record's layout — each field's name, offset, type and meaning — is written
+down once, in [`schema/layouts.json`](schema/layouts.json). Everything else
+that needs it is generated from that file by `python tools/gen_layouts.py`
+(also `npm run gen:layouts`):
 
-| Record | JSDoc typedef | Python `TypedDict` |
-|---|---|---|
-| `ExampleNamespace.DeviceQualityAllowList` entry | `DeviceQualityRecord` in `scripts/dump_hd_quality_list.js` | `DeviceQualityRecord` in `tools/records.py` |
-| `ExampleNamespace.DeviceRecommendConfig` entry | `RecommendConfigRecord` in `scripts/dump_recommend_config.js` | `RecommendConfigRecord` in `tools/records.py` |
-| 5-field subset of the above, from the live selection hooks | `SelectionResult` in `scripts/dump_selection_logic.js` | *(none — see `records.py`'s docstring)* |
+| Generated file | What it is |
+|---|---|
+| `scripts/_layouts.js` | The layout tables the agents read with (`readRecord(ptr, RecommendConfigRecordLayout)`), plus JSDoc `@typedef`s for the records they produce. |
+| `tools/records.py` | The `TypedDict`s the Python drivers annotate with (`DeviceQualityRecord`, `RecommendConfigRecord`, and `SelectionResult`, the 5-field subset `dump_selection_logic.js` watches live). |
+| `docs/MEMORY_LAYOUT.md` | The offset listings between its `GENERATED` markers; the prose around them is hand-written and doesn't repeat offsets. |
 
-These are documentation, not enforcement — this project has no
-TS/`checkJs` build step and nothing runs mypy/pyright over `records.py` —
-but `tests/test_records_schema.py` does diff the JS `@typedef` fields
-against the matching Python `TypedDict` on every test run, so the two
-sides can't silently drift apart the way a comment easily could.
+Because the agents never spell out an offset or a read width themselves,
+there is nothing to keep in sync by hand — and `tests/test_layouts.py` covers
+the remaining ways it can go wrong: a stale or hand-edited generated file, an
+offset restated in an agent or in the docs' prose, an invalid layout
+(misaligned, overlapping, unknown type), and — the part a field-name diff
+can't see — the *types*. It runs `readRecord` and the real agents under Node
+against a fake process image and compares every decoded field, including
+sign, width and nullable strings, with an independent Python decoder, so a
+reader that started treating a `u32` as an `int8` fails a test rather than
+silently corrupting a dump. `records.py` remains plain annotations: nothing
+runs mypy/pyright over it and RPC still hands the drivers plain `dict`s.
 
 ## Findings
 

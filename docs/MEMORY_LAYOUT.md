@@ -4,14 +4,16 @@ Findings from instrumenting `UnityFramework` in this build with Frida.
 These are build-specific and will need to be re-verified against any new
 build (offsets in particular will drift — see `tools/relocate_offset.py`).
 
-> For a quick field-by-field reference rather than the full narrative
-> below, see the `DeviceQualityRecord` / `RecommendConfigRecord` /
-> `SelectionResult` JSDoc `@typedef` blocks in the matching
-> `scripts/*.js` files, and `tools/records.py`'s `TypedDict`s (the Python
-> mirror of the first two — see that file's docstring for why
-> `SelectionResult` has no Python-side equivalent). This file stays useful
-> for *how* those layouts were worked out — see `ITERATION_HISTORY.md` for
-> that process end to end.
+> The field-by-field listings below are **generated** from
+> [`schema/layouts.json`](../schema/layouts.json) - the one place an offset or
+> a field type is written down. The Frida agents read their records through
+> the same schema (`scripts/_layouts.js`, generated) and `tools/records.py`
+> is generated from it too, so change the schema and run
+> `python tools/gen_layouts.py` rather than editing any of those by hand;
+> `tests/test_layouts.py` fails if one is stale. The text around the listings
+> is the hand-written narrative (why the layout looks the way it does) and
+> deliberately doesn't repeat offsets. See `ITERATION_HISTORY.md` for how the
+> layouts were worked out, wrong guesses included.
 
 ## IL2CPP object header
 
@@ -37,56 +39,64 @@ individually. The two records below show both effects:
 
 ## `System.String`
 
+<!-- BEGIN GENERATED: il2cpp-string (tools/gen_layouts.py from schema/layouts.json - do not edit) -->
+```text
++0x00  klass    (8 bytes, object header)
++0x08  length   (int32, NOT padded to 8 bytes)
++0x0c  UTF-16LE chars, starting immediately after length, no gap
 ```
-+0x00 : klass          (8 bytes)
-+0x08 : length          (int32, NOT padded to 8 bytes)
-+0x0C : UTF-16LE chars, starting immediately, no gap
-```
+<!-- END GENERATED: il2cpp-string -->
 
 ## `DeviceQualityAllowList` record
 
-```
-+0x00 : klass
-+0x08 : id                (uint32)         +0x0c..0x0f: padding
-+0x10 : szName_ByteArray  (byte[]*)        observed NULL every time
-+0x18 : enabled           (int8)           +0x19..0x1f: padding
-+0x20 : name              (System.String*) device name/identifier
+<!-- BEGIN GENERATED: DeviceQualityRecord (tools/gen_layouts.py from schema/layouts.json - do not edit) -->
+```text
++0x00  klass             object header (8 bytes)
++0x08  id                uint32          numeric record id
++0x0c  (padding, 4 bytes)
++0x10  szName_ByteArray  (not read; 8 bytes)
++0x18  enabled           int8            HD render quality on/off flag (observed as 0 or 1)
++0x19  (padding, 7 bytes)
++0x20  name              System.String*  device name/identifier
 ```
 
-`enabled` is the HD render quality on/off flag. The `byte[]` field at
-`+0x10` is unused in practice; the real name lives in the `System.String`
-at `+0x20`. The pointers land on 8-byte boundaries because pointers must
-be 8-aligned, which is why the small fields look like they occupy full
-slots here.
+`szName_ByteArray` (`+0x10..0x17`): byte[]* - observed NULL every time and unused in practice; the real name is the System.String in `name`.
+<!-- END GENERATED: DeviceQualityRecord -->
+
+The pointers land on 8-byte boundaries because pointers must be 8-aligned,
+which is why the small fields look like they occupy full slots here.
 
 ## `DeviceRecommendConfig` record
 
-```
-+0x08 : id                              (uint32)
-+0x0c : type                            (uint32)
-+0x10 : (not identified, 8 bytes)       not read by any agent here
-+0x18 : paramMin1 / +0x1c : paramMax1   (int32)
-+0x20 : paramMin2 / +0x24 : paramMax2   (int32)
-+0x28 : paramMin3 / +0x2c : paramMax3   (int32)
-+0x30 : deviceLevel                     (uint32)
-+0x34 : supportsFPS60                   (uint32)
-+0x38 : supportsParticleHD              (uint32)
-+0x3c : recommendGraphicMode            (uint32)
-+0x40 : renderQualityPerfMode           (uint32)
-+0x44 : particleQualityPerfMode         (uint32)
-+0x48 : resolutionPerfMode              (uint32)
-+0x4c : fpsPerfMode                     (uint32)
-+0x50 : renderQualityGraphicMode        (uint32)
-+0x54 : particleQualityGraphicMode      (uint32)
-+0x58 : resolutionGraphicMode           (uint32)
-+0x5c : fpsGraphicMode                  (uint32)
-+0x60 : szConfig                        (System.String*)
+<!-- BEGIN GENERATED: RecommendConfigRecord (tools/gen_layouts.py from schema/layouts.json - do not edit) -->
+```text
++0x00  klass                       object header (8 bytes)
++0x08  id                          uint32          numeric record id
++0x0c  type                        uint32          record type discriminator
++0x10  unidentified                (not read; 8 bytes)
++0x18  paramMin1                   int32
++0x1c  paramMax1                   int32
++0x20  paramMin2                   int32
++0x24  paramMax2                   int32
++0x28  paramMin3                   int32
++0x2c  paramMax3                   int32
++0x30  deviceLevel                 uint32
++0x34  supportsFPS60               uint32          observed as a 0/1 flag
++0x38  supportsParticleHD          uint32          observed as a 0/1 flag
++0x3c  recommendGraphicMode        uint32
++0x40  renderQualityPerfMode       uint32
++0x44  particleQualityPerfMode     uint32
++0x48  resolutionPerfMode          uint32
++0x4c  fpsPerfMode                 uint32
++0x50  renderQualityGraphicMode    uint32
++0x54  particleQualityGraphicMode  uint32
++0x58  resolutionGraphicMode       uint32
++0x5c  fpsGraphicMode              uint32
++0x60  szConfig                    System.String*  graphics preset name
 ```
 
-`+0x10..0x17` is an 8-byte region the investigation never resolved. It
-is 8-aligned and sits before the first `int32` run, which is consistent
-with a pointer field, but nothing here confirms that — treat it as
-unknown until you read it on your own build.
+`unidentified` (`+0x10..0x17`): 8-byte region the investigation never resolved; not read by any agent. It is 8-aligned and sits before the first int32 run, which is consistent with a pointer field, but nothing here confirms that - treat it as unknown until you read it on your own build.
+<!-- END GENERATED: RecommendConfigRecord -->
 
 Field names/spelling match the naming convention used elsewhere in this
 build's managed metadata.
