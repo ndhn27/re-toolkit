@@ -8,7 +8,7 @@
 // with `npm run build` and run the bundled dist/dump_recommend_config.js
 // - see README.md's "Building the agents" section.
 
-import { readIl2CppString, waitForModule, createRecordStore } from "./_lib.js";
+import { readIl2CppString, waitForModule, createRecordStore, unpackFailed, createSkipLogger } from "./_lib.js";
 
 /**
  * One entry of ExampleNamespace.DeviceRecommendConfig, as read from a
@@ -56,6 +56,7 @@ if (FRIDA_OFFSET === 0x0) {
 }
 
 const { records, rpcExports } = /** @type {import("./_lib.js").RecordStore<RecommendConfigRecord>} */ (createRecordStore());
+const logSkip = createSkipLogger("DeviceRecommendConfig");
 
 function installHook(mod) {
     const addr = mod.base.add(FRIDA_OFFSET);
@@ -66,7 +67,10 @@ function installHook(mod) {
             this.recordPtr = args[0];
         },
         onLeave(retval) {
-            if (retval.toInt32() !== 0) return;
+            if (unpackFailed(retval)) {
+                logSkip(retval);
+                return;
+            }
 
             const rec = this.recordPtr;
             try {

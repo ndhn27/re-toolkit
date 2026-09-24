@@ -9,13 +9,21 @@ target app's own unpack/lookup functions at runtime and read memory;
 nothing patches the binary or writes back into the process.
 
 This is a **generalized template**, distilled from a real investigation
-against one specific app. All target-identifying details — the package
-name, the app's actual internal class/method names, and the memory
-offsets found in that build — have been replaced with placeholders
-(`com.example.unitygame`, `ExampleNamespace.*`, `FRIDA_OFFSET = 0x0`,
-etc.) so this can be reused as a starting point for research on **your
-own** target, rather than being usable as-is against any particular app.
-You'll need to re-derive the real class/method names and offsets for
+against one specific app. The package name, the memory offsets found in
+that build, and the top-level namespace have been replaced with
+placeholders (`com.example.unitygame`, `ExampleNamespace`,
+`FRIDA_OFFSET = 0x0`, etc.) so this can be reused as a starting point for
+research on **your own** target, rather than being usable as-is against
+any particular app.
+
+**Note:** the specific class/method/field names below the namespace
+(`DeviceQualityAllowList`, `DeviceRecommendConfig`,
+`GetConfigMatchingDevicePattern`, `GetRecommendedQualityPreset`,
+`szName_ByteArray`, and the struct layout in `docs/MEMORY_LAYOUT.md`)
+have **not** been genericized — they're left as-is from the worked
+example so the methodology notes in `docs/ITERATION_HISTORY.md` stay
+internally consistent. Don't assume they're safe boilerplate: re-derive
+and rename the class/method/field names, in addition to the offsets, for
 whatever app you're actually studying, using Ghidra or similar, following
 the methodology in `docs/ITERATION_HISTORY.md`.
 
@@ -196,6 +204,17 @@ edit to `scripts/*.js` or `scripts/_lib.js`.
 forward when the app updates.)
 
 ## Keeping real offsets out of git
+
+**Note:** `0xab68fc8`, wherever you see it in this README, in the
+docstrings/usage examples of `tools/_common.py`, `tools/relocate_offset.py`,
+and `tools/run_hd_quality_dump.py`, and in the fixtures under `tests/`, is
+the same fictional example value reused for illustration only — it is not
+a real offset from the original investigation. Unlike `scripts/*.js` and
+`tools/config.py`, `check_placeholders.py` does not scan the README, the
+`tools/` docstrings, or `tests/` (see "Checks exactly what README.md tells
+you to edit" in its own docstring), so don't mistake its presence in those
+files for something that's been placeholder-checked - it's just a
+made-up number used consistently in usage examples and test data.
 
 The placeholders described above (`com.example.unitygame`, `FRIDA_OFFSET =
 0x0`, etc.) only stay placeholders if nobody forgets to reset them before

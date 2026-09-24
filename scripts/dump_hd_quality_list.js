@@ -24,7 +24,7 @@
 // Frida against a running instance of the game. See README.md's
 // "Building the agents" section.
 
-import { readIl2CppString, waitForModule, createRecordStore } from "./_lib.js";
+import { readIl2CppString, waitForModule, createRecordStore, unpackFailed, createSkipLogger } from "./_lib.js";
 
 /**
  * One entry of ExampleNamespace.DeviceQualityAllowList, as read from a
@@ -57,6 +57,7 @@ const OFFSETS = {
 };
 
 const { records, rpcExports } = /** @type {import("./_lib.js").RecordStore<DeviceQualityRecord>} */ (createRecordStore());
+const logSkip = createSkipLogger("DeviceQualityAllowList");
 
 function installHook(mod) {
     const addr = mod.base.add(FRIDA_OFFSET);
@@ -67,7 +68,10 @@ function installHook(mod) {
             this.recordPtr = args[0];
         },
         onLeave(retval) {
-            if (retval.toInt32() !== 0) return; // unpack failed, skip silently
+            if (unpackFailed(retval)) {
+                logSkip(retval);
+                return;
+            }
 
             const rec = this.recordPtr;
             try {

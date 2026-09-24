@@ -11,7 +11,7 @@
 // dist/dump_recommend_config_probe.js - see README.md's "Building the
 // agents" section.
 
-import { waitForModule } from "./_lib.js";
+import { waitForModule, unpackFailed } from "./_lib.js";
 
 const FRIDA_OFFSET = 0x00000000; // <-- SET THIS
 
@@ -33,8 +33,8 @@ function installHook(mod) {
             this.recordPtr = args[0];
         },
         onLeave(retval) {
-            if (retval.toInt32() !== 0) {
-                console.log(`[!] unpack failed: ${retval.toInt32()}`);
+            if (unpackFailed(retval)) {
+                console.log(`[!] unpack failed: ${retval}`);
                 return;
             }
             count++;

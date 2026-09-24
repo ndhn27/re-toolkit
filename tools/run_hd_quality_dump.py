@@ -42,12 +42,27 @@ Usage:
     python run_hd_quality_dump.py --offset ab68fc8 --out records_ab68fc8.json
     FRIDA_OFFSET=0xab68fc8 python run_hd_quality_dump.py
     python run_hd_quality_dump.py --agent ../dist/dump_recommend_config.js --offset 0x...
+
+AGENT_PATH's default is resolved from this file's own location (via
+__file__), not the current working directory, so the driver finds dist/
+whether you run it as `python run_hd_quality_dump.py` from inside tools/,
+`python tools/run_hd_quality_dump.py` from the repo root, or anything
+else. An explicit `--agent some/relative/path.js`, by contrast, IS taken
+relative to your current directory, same as any other CLI path argument -
+that's expected, not the same bug.
+
+OUT_PATH's default ("records.json") is deliberately left relative to the
+current directory instead - unlike the agent, an *output* file should
+land wherever you happen to be running the command from, not next to the
+script. Pass an absolute --out if you want it to land somewhere fixed
+regardless of CWD.
 """
 import argparse
 import json
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import frida
@@ -62,7 +77,9 @@ if TYPE_CHECKING:
     # referenced in a `# type:` comment, hence the noqa staying here too.
     from records import DeviceQualityRecord, RecommendConfigRecord  # noqa: F401
 
-AGENT_PATH = "../dist/dump_hd_quality_list.js"
+# Anchored to this file's location, not the CWD - see the module docstring.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+AGENT_PATH = str(REPO_ROOT / "dist" / "dump_hd_quality_list.js")
 OUT_PATH = "records.json"
 
 
@@ -79,7 +96,8 @@ def main():
                     "export its collected records to JSON when you press Enter.")
     add_override_args(ap, offset=True)
     ap.add_argument("--agent", default=AGENT_PATH, metavar="PATH",
-                    help=f"bundled agent under dist/ to load (default: {AGENT_PATH})")
+                    help=f"bundled agent under dist/ to load "
+                         f"(default: {Path(AGENT_PATH).relative_to(REPO_ROOT)})")
     ap.add_argument("--out", default=OUT_PATH, metavar="PATH",
                     help=f"where to write the exported JSON (default: {OUT_PATH})")
     args = ap.parse_args()

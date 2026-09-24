@@ -14,14 +14,22 @@ environment variables (precedence: CLI > env > config.py).
 Usage:
     python list_exports.py
     python list_exports.py --target com.example.other --remote 127.0.0.1:1234
+
+AGENT_PATH is resolved from this file's own location (via __file__), not
+the current working directory - see run_hd_quality_dump.py's docstring
+for why (`python tools/list_exports.py` from the repo root used to raise
+a FileNotFoundError because "../dist/..." was resolved against the CWD).
 """
 import argparse
 import time
+from pathlib import Path
+
 import frida
 
 from _common import add_override_args, load_agent_source, resolve_settings
 
-AGENT_PATH = "../dist/list_il2cpp_exports.js"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+AGENT_PATH = str(REPO_ROOT / "dist" / "list_il2cpp_exports.js")
 WAIT_SECONDS = 8
 
 

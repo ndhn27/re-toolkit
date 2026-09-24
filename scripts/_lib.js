@@ -43,11 +43,22 @@ export function readIl2CppString(strPtr) {
  * was derived from an iOS investigation and hasn't been tried on Android
  * (see README.md); on Android you'd wait on "libil2cpp.so" instead, and
  * the record layouts below would need re-deriving for that build too.
+ *
+ * Only the *lookup* (`Process.getModuleByName`) is what "not loaded yet"
+ * actually means, so only that call is wrapped in try/catch. `onReady`
+ * runs outside it deliberately: if the module IS already loaded but
+ * `onReady` itself throws (e.g. `Interceptor.attach` failing because of a
+ * bad/misconfigured offset), that's a real error in the hook, not a
+ * "wait for it to load" situation - `attachModuleObserver`'s `onAdded`
+ * only fires for modules loaded *after* the observer is attached, so
+ * treating that error as "not loaded yet" would silently swallow it and
+ * hang forever waiting on an observer that can never fire, since the
+ * module is already resident.
  */
 export function waitForModule(moduleName, onReady) {
+    let mod;
     try {
-        const mod = Process.getModuleByName(moduleName);
-        onReady(mod);
+        mod = Process.getModuleByName(moduleName);
     } catch (e) {
         console.log(`[i] ${moduleName} not loaded yet - waiting for module observer...`);
         const observer = Process.attachModuleObserver({
@@ -58,7 +69,46 @@ export function waitForModule(moduleName, onReady) {
                 }
             },
         });
+        return;
     }
+    onReady(mod);
+}
+
+/**
+ * True if `retval` - the raw return value Frida's `Interceptor.attach`
+ * hands to `onLeave` - means an `...$$unpack` call FAILED, where the
+ * convention (confirmed for every hook in this project - see
+ * docs/MEMORY_LAYOUT.md) is 0 = success.
+ *
+ * `retval` is a NativePointer wrapping the full-width return register,
+ * not a 32-bit int. `retval.toInt32() !== 0` - the check every agent used
+ * to use - truncates to the low 32 bits first, so on a 64-bit target a
+ * return value whose low 32 bits are zero but whose upper bits aren't
+ * would be misread as "0 = success" even though the real 64-bit value is
+ * non-zero. `retval.isNull()` compares the whole native word against
+ * zero instead, so it can't be fooled that way.
+ */
+export function unpackFailed(retval) {
+    return !retval.isNull();
+}
+
+/**
+ * Returns a function to call from `onLeave` whenever `unpackFailed()` is
+ * true, so a failed unpack() is counted and logged instead of being
+ * dropped with zero trace (the previous behavior for
+ * dump_hd_quality_list.js / dump_recommend_config.js was `return;` with
+ * no log line at all - indistinguishable from the hook simply never
+ * firing, e.g. because of a wrong FRIDA_OFFSET). `what` is a short label
+ * (the record type name) included in the log line so it's clear which
+ * hook is skipping when an agent hooks more than one function.
+ */
+export function createSkipLogger(what) {
+    let skipped = 0;
+    return function logSkip(retval) {
+        skipped++;
+        console.log(`[skip] ${what} unpack() returned ${retval} (expected 0) - ` +
+            `record dropped (total skipped so far: ${skipped})`);
+    };
 }
 
 /**
