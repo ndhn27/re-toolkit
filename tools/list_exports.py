@@ -1,19 +1,27 @@
 """
 list_exports.py
 
-Spawns com.example.unitygame, loads scripts/list_il2cpp_exports.js, waits a
-few seconds for it to print export/symbol matches, then detaches. No RPC
-call involved - just reads the console messages.
+Spawns the target app, loads the bundled dist/list_il2cpp_exports.js (built with
+`npm run build` from scripts/list_il2cpp_exports.js - see README.md's
+"Building the agents"), waits a few seconds for it to print export/symbol
+matches, then detaches. No RPC call involved - just reads the console
+messages.
+
+TARGET and REMOTE_ADDR default to the values in config.py; override them per
+run with --target / --remote or the FRIDA_TARGET / FRIDA_REMOTE_ADDR
+environment variables (precedence: CLI > env > config.py).
 
 Usage:
     python list_exports.py
+    python list_exports.py --target com.example.other --remote 127.0.0.1:1234
 """
+import argparse
 import time
 import frida
 
-TARGET = "com.example.unitygame"
-AGENT_PATH = "../scripts/list_il2cpp_exports.js"
-REMOTE_ADDR = "127.0.0.1:27042"
+from _common import add_override_args, load_agent_source, resolve_settings
+
+AGENT_PATH = "../dist/list_il2cpp_exports.js"
 WAIT_SECONDS = 8
 
 
@@ -25,16 +33,21 @@ def on_message(message, data):
 
 
 def main():
-    with open(AGENT_PATH, "r", encoding="utf-8") as f:
-        source = f.read()
+    ap = argparse.ArgumentParser(
+        description="Spawn the target app, load the bundled export-listing agent, "
+                    "and print the exports/symbols it finds.")
+    add_override_args(ap, offset=False)
+    settings = resolve_settings(ap.parse_args(), offset=False)
 
-    device = frida.get_device_manager().add_remote_device(REMOTE_ADDR)
+    source = load_agent_source(AGENT_PATH)
+
+    device = frida.get_device_manager().add_remote_device(settings.remote_addr)
 
     def on_detached(reason):
         print(f"[!] Session detached, reason: {reason}")
 
-    print(f"[*] Spawning {TARGET}...")
-    pid = device.spawn([TARGET])
+    print(f"[*] Spawning {settings.target}...")
+    pid = device.spawn([settings.target])
     session = device.attach(pid)
     session.on("detached", on_detached)
 

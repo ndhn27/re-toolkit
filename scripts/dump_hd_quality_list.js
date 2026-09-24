@@ -12,58 +12,35 @@
 //
 // Record layout (DeviceQualityAllowList entry):
 //   +0x00 : klass
-//   +0x08 : dwID      (uint32)  - numeric record id
-//   +0x18 : chEnable  (int8)    - HD render quality on/off flag
+//   +0x08 : id      (uint32)  - numeric record id
+//   +0x18 : enabled  (int8)    - HD render quality on/off flag
 //   +0x20 : name      (System.String*) - device name/identifier
 //
-// System.String layout in this build:
-//   +0x00 : klass (8 bytes)
-//   +0x08 : length (int32, NOT padded to 8 bytes)
-//   +0x0C : UTF-16LE characters, starting immediately, no gap
+// System.String layout: see readIl2CppString in scripts/_lib.js.
 //
 // Usage: set FRIDA_OFFSET to the file offset of the unpack function (from
-// Ghidra's Symbol Table, using Image Base = 0), then run this with Frida
-// against a running instance of the game.
+// Ghidra's Symbol Table, using Image Base = 0), then build this with
+// `npm run build` and run the bundled dist/dump_hd_quality_list.js with
+// Frida against a running instance of the game. See README.md's
+// "Building the agents" section.
+
+import { readIl2CppString, waitForModule, createRecordStore } from "./_lib.js";
 
 const FRIDA_OFFSET = 0x0; // <-- SET THIS: build-specific, find via Ghidra
 
+if (FRIDA_OFFSET === 0x0) {
+    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real offset " +
+        "(or set config.FRIDA_OFFSET and run this via tools/run_hd_quality_dump.py) " +
+        "before running. See docs/ITERATION_HISTORY.md for how to find it.");
+}
+
 const OFFSETS = {
-    dwID: 0x08,
-    chEnable: 0x18,
+    id: 0x08,
+    enabled: 0x18,
     namePtr: 0x20,
 };
 
-const records = new Map(); // dwID -> {dwID, chEnable, name}
-
-function readIl2CppString(strPtr) {
-    if (strPtr.isNull()) return null;
-    const len = strPtr.add(0x08).readS32();
-    if (len < 0 || len > 512) return `<unexpected len: ${len}>`;
-    if (len === 0) return "";
-    try {
-        return strPtr.add(0x0c).readUtf16String(len);
-    } catch (e) {
-        return `<read error: ${e.message}>`;
-    }
-}
-
-function main() {
-    let mod;
-    try {
-        mod = Process.getModuleByName("UnityFramework");
-        installHook(mod);
-    } catch (e) {
-        console.log("[i] UnityFramework not loaded yet - waiting for module observer...");
-        const observer = Process.attachModuleObserver({
-            onAdded(m) {
-                if (m.name === "UnityFramework") {
-                    observer.detach();
-                    installHook(m);
-                }
-            },
-        });
-    }
-}
+const { records, rpcExports } = createRecordStore();
 
 function installHook(mod) {
     const addr = mod.base.add(FRIDA_OFFSET);
@@ -78,18 +55,18 @@ function installHook(mod) {
 
             const rec = this.recordPtr;
             try {
-                const dwID = rec.add(OFFSETS.dwID).readU32();
-                const chEnable = rec.add(OFFSETS.chEnable).readS8();
+                const id = rec.add(OFFSETS.id).readU32();
+                const enabled = rec.add(OFFSETS.enabled).readS8();
                 const namePtr = rec.add(OFFSETS.namePtr).readPointer();
                 const name = readIl2CppString(namePtr);
 
-                const isNew = !records.has(dwID);
-                records.set(dwID, { dwID, chEnable, name });
+                const isNew = !records.has(id);
+                records.set(id, { id, enabled, name });
 
-                // Only log on a brand-new dwID - avoids spamming re-sent
+                // Only log on a brand-new id - avoids spamming re-sent
                 // records (the server may push the whole table again).
                 if (isNew) {
-                    console.log(`[new] dwID=${dwID}  chEnable=${chEnable}  name="${name}"  (total: ${records.size})`);
+                    console.log(`[new] id=${id}  enabled=${enabled}  name="${name}"  (total: ${records.size})`);
                 }
             } catch (e) {
                 console.log("[!] Error reading record:", e.message);
@@ -100,17 +77,6 @@ function installHook(mod) {
     console.log("[+] Hook installed. Waiting for the server to push DeviceQualityAllowList data...");
 }
 
-rpc.exports = {
-    getCount: function () {
-        return records.size;
-    },
-    getRecords: function () {
-        return Array.from(records.values());
-    },
-    clear: function () {
-        records.clear();
-        return true;
-    },
-};
+rpc.exports = rpcExports;
 
-main();
+waitForModule("UnityFramework", installHook);

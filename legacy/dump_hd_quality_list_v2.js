@@ -85,7 +85,7 @@ function installHook(mod) {
             const rec = this.recordPtr;
             try {
                 count++;
-                const dwID = rec.add(0x08).readU32();
+                const id = rec.add(0x08).readU32();
 
                 const ptr10 = rec.add(0x10).readPointer();
                 const ptr18 = rec.add(0x18).readPointer();
@@ -96,7 +96,7 @@ function installHook(mod) {
                 const p18_string = tryAsIl2CppString(ptr18);
 
                 console.log(
-                    `[${count}] dwID=${dwID}\n` +
+                    `[${count}] id=${id}\n` +
                     `      +0x10=${ptr10}  as byte[]="${p10_bytes}"  as string="${p10_string}"\n` +
                     `      +0x18=${ptr18}  as byte[]="${p18_bytes}"  as string="${p18_string}"`
                 );

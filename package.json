@@ -1,0 +1,17 @@
+{
+  "name": "il2cpp-render-quality-research",
+  "private": true,
+  "description": "Build step for the Frida agents in scripts/ - bundles each entry point (and its import of scripts/_lib.js) into a single self-contained file under dist/, which is what Frida and the Python drivers in tools/ actually load.",
+  "scripts": {
+    "build": "npm run build:hd-quality-list && npm run build:recommend-config && npm run build:recommend-config-probe && npm run build:selection-logic && npm run build:list-exports",
+    "build:hd-quality-list": "frida-compile scripts/dump_hd_quality_list.js -o dist/dump_hd_quality_list.js",
+    "build:recommend-config": "frida-compile scripts/dump_recommend_config.js -o dist/dump_recommend_config.js",
+    "build:recommend-config-probe": "frida-compile scripts/dump_recommend_config_probe.js -o dist/dump_recommend_config_probe.js",
+    "build:selection-logic": "frida-compile scripts/dump_selection_logic.js -o dist/dump_selection_logic.js",
+    "build:list-exports": "frida-compile scripts/list_il2cpp_exports.js -o dist/list_il2cpp_exports.js",
+    "watch:hd-quality-list": "frida-compile scripts/dump_hd_quality_list.js -o dist/dump_hd_quality_list.js -w"
+  },
+  "devDependencies": {
+    "frida-compile": "^16.0.0"
+  }
+}

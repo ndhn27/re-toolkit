@@ -7,29 +7,19 @@
 // DeviceQualityAllowList (see docs/MEMORY_LAYOUT.md).
 //
 // Set FRIDA_OFFSET below before running (from Ghidra's Symbol Table, using
-// Image Base = 0).
+// Image Base = 0). Build this with `npm run build` and run the bundled
+// dist/dump_recommend_config_probe.js - see README.md's "Building the
+// agents" section.
+
+import { waitForModule } from "./_lib.js";
 
 const FRIDA_OFFSET = 0x00000000; // <-- SET THIS
 
-const RECORD_DUMP_SIZE = 0x80; // wider than the earlier probe - this struct has more fields
-
-function main() {
-    let mod;
-    try {
-        mod = Process.getModuleByName("UnityFramework");
-        installHook(mod);
-    } catch (e) {
-        console.log("[i] UnityFramework not loaded yet - waiting for module observer...");
-        const observer = Process.attachModuleObserver({
-            onAdded(m) {
-                if (m.name === "UnityFramework") {
-                    observer.detach();
-                    installHook(m);
-                }
-            },
-        });
-    }
+if (FRIDA_OFFSET === 0x0) {
+    throw new Error("FRIDA_OFFSET is still 0x0 - set it to your build's real offset before running.");
 }
+
+const RECORD_DUMP_SIZE = 0x80; // wider than the earlier probe - this struct has more fields
 
 function installHook(mod) {
     const addr = mod.base.add(FRIDA_OFFSET);
@@ -83,4 +73,4 @@ function installHook(mod) {
     console.log("[+] Hook installed. Waiting for the server to push DeviceRecommendConfig data...");
 }
 
-main();
+waitForModule("UnityFramework", installHook);

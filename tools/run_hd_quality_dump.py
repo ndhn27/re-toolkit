@@ -2,26 +2,58 @@
 run_hd_quality_dump.py
 
 Spawns the game, loads a Frida agent that exposes getCount()/getRecords()
-via rpc.exports (i.e. scripts/dump_hd_quality_list.js or
-scripts/dump_recommend_config.js), and streams its console output live.
-Press Enter at any point to pull the accumulated table via RPC, write it to
-a JSON file, and detach.
+via rpc.exports (i.e. dump_hd_quality_list.js or dump_recommend_config.js,
+bundled), and streams its console output live. Press Enter at any point to
+pull the accumulated table via RPC, write it to a JSON file, and detach.
 
 NOTE: the original version of this script had a mismatched docstring/
 AGENT_PATH (it said "v5" but actually loaded dump_selection_logic.js, which
 has no rpc.exports and would fail on script.exports_sync.get_count()). This
-version makes the target script explicit via AGENT_PATH below - point it at
-whichever agent you're currently running.
+version makes the target script explicit - pick it with --agent (default:
+AGENT_PATH below) - and it must be one that exposes rpc.exports.
+
+The agent must be the *bundled* one under dist/, built with
+`npm run build` from the corresponding scripts/*.js source (see README.md's
+"Building the agents") - not scripts/ directly, which uses ES module
+imports that only resolve after bundling.
+
+TARGET, REMOTE_ADDR, and FRIDA_OFFSET default to the values in config.py, and
+can be overridden per run - which is what you want while probing offsets, so
+you don't have to edit a file between attempts:
+
+    CLI flag       env var             config.py
+    --target ID    FRIDA_TARGET        TARGET
+    --remote H:P   FRIDA_REMOTE_ADDR   REMOTE_ADDR
+    --offset HEX   FRIDA_OFFSET        FRIDA_OFFSET
+
+Precedence is CLI > env > config.py, and the resolved values (with their
+source) are printed at startup. The offset is injected into the loaded
+agent's own FRIDA_OFFSET constant automatically, and recorded in the exported
+JSON's `meta`. Offsets are hex, with or without a 0x prefix.
+
+The exported JSON is wrapped as `{"meta": {...}, "records": [...]}` rather
+than a bare array, so a records.json from one dump can't get silently
+mixed up with one from a different build/offset later - see `meta` below.
+When trying several offsets in a row, give each run its own --out so the
+next run doesn't overwrite the previous dump.
 
 Usage:
-    python run_hd_quality_dump.py
+    python run_hd_quality_dump.py --offset 0xab68fc8
+    python run_hd_quality_dump.py --offset ab68fc8 --out records_ab68fc8.json
+    FRIDA_OFFSET=0xab68fc8 python run_hd_quality_dump.py
+    python run_hd_quality_dump.py --agent ../dist/dump_recommend_config.js --offset 0x...
 """
+import argparse
 import json
+import os
+import sys
+from datetime import datetime, timezone
+
 import frida
 
-TARGET = "com.example.unitygame"
-AGENT_PATH = "../scripts/dump_hd_quality_list.js"
-REMOTE_ADDR = "127.0.0.1:27042"
+from _common import add_override_args, load_agent_source, resolve_settings
+
+AGENT_PATH = "../dist/dump_hd_quality_list.js"
 OUT_PATH = "records.json"
 
 
@@ -33,16 +65,32 @@ def on_message(message, data):
 
 
 def main():
-    with open(AGENT_PATH, "r", encoding="utf-8") as f:
-        source = f.read()
+    ap = argparse.ArgumentParser(
+        description="Spawn the game, stream a bundled Frida agent's output, and "
+                    "export its collected records to JSON when you press Enter.")
+    add_override_args(ap, offset=True)
+    ap.add_argument("--agent", default=AGENT_PATH, metavar="PATH",
+                    help=f"bundled agent under dist/ to load (default: {AGENT_PATH})")
+    ap.add_argument("--out", default=OUT_PATH, metavar="PATH",
+                    help=f"where to write the exported JSON (default: {OUT_PATH})")
+    args = ap.parse_args()
+    settings = resolve_settings(args, offset=True)
 
-    device = frida.get_device_manager().add_remote_device(REMOTE_ADDR)
+    if settings.offset == 0:
+        # Fail here rather than after spawning the app: the agent itself
+        # refuses to hook at 0x0, so there's nothing useful to do with it.
+        sys.exit("[!] Offset is 0x0 - pass --offset, set $FRIDA_OFFSET, or set "
+                 "FRIDA_OFFSET in config.py. Not spawning the app.")
+
+    source = load_agent_source(args.agent, settings.offset)
+
+    device = frida.get_device_manager().add_remote_device(settings.remote_addr)
 
     def on_detached(reason):
         print(f"[!] Session detached, reason: {reason}")
 
-    print(f"[*] Spawning {TARGET}...")
-    pid = device.spawn([TARGET])
+    print(f"[*] Spawning {settings.target}...")
+    pid = device.spawn([settings.target])
     session = device.attach(pid)
     session.on("detached", on_detached)
 
@@ -53,7 +101,7 @@ def main():
     device.resume(pid)
     print(f"[*] Spawned and resumed, pid={pid}")
     print("[*] Listening - new records print immediately. Play through the game normally.")
-    print("[*] Press Enter at any point to export records.json and exit.\n")
+    print("[*] Press Enter at any point to export the records and exit.\n")
 
     input()
 
@@ -61,9 +109,18 @@ def main():
         count = script.exports_sync.get_count()
         print(f"[*] Collected {count} unique records. Exporting...")
         recs = script.exports_sync.get_records()
-        with open(OUT_PATH, "w", encoding="utf-8") as f:
-            json.dump(recs, f, ensure_ascii=False, indent=2)
-        print(f"[+] Wrote {OUT_PATH}")
+        output = {
+            "meta": {
+                "target": settings.target,
+                "agent": os.path.basename(args.agent),
+                "offset": hex(settings.offset),
+                "dumped_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "records": recs,
+        }
+        with open(args.out, "w", encoding="utf-8") as f:
+            json.dump(output, f, ensure_ascii=False, indent=2)
+        print(f"[+] Wrote {args.out}")
     except Exception as e:
         print("[!] Error retrieving data (does the loaded agent expose rpc.exports?):", e)
 

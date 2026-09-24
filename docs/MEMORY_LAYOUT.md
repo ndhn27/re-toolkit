@@ -24,13 +24,13 @@ several early wrong guesses in the iteration history below.
 
 ```
 +0x00 : klass
-+0x08 : dwID       (uint32)
-+0x18 : chEnable   (int8 — HD render quality on/off flag)
++0x08 : id       (uint32)
++0x18 : enabled   (int8 — HD render quality on/off flag)
 +0x20 : name       (System.String* — device name/identifier)
 ```
 
 Every field occupies a full 8-byte slot regardless of its actual size —
-including the single-byte `chEnable` flag and the padded `uint32 dwID`.
+including the single-byte `enabled` flag and the padded `uint32 id`.
 There's also an unused `szName_ByteArray` (`byte[]`) field at `+0x10` that
 was consistently observed as `NULL`; the real name lives in the
 `System.String` field at `+0x20` instead.
@@ -38,23 +38,23 @@ was consistently observed as `NULL`; the real name lives in the
 ## `DeviceRecommendConfig` record
 
 ```
-+0x08 : dwID                              (uint32)
-+0x0c : dwType                            (uint32)
-+0x18 : iIntParam1min / +0x1c : iIntParam1max   (int32)
-+0x20 : iIntParam2min / +0x24 : iIntParam2max   (int32)
-+0x28 : iIntParam3min / +0x2c : iIntParam3max   (int32)
-+0x30 : dwDeviceLevel                     (uint32)
-+0x34 : dwISSupportFPS60                  (uint32)
-+0x38 : dwISSupportParticleHD             (uint32)
-+0x3c : dwRecommendGraphicMode            (uint32)
-+0x40 : dwRenderQualityPerformanceMode    (uint32)
-+0x44 : dwParticleQualityPerformanceMode  (uint32)
-+0x48 : dwResolutionPerformanceMode       (uint32)
-+0x4c : dwFPSPerformanceMode              (uint32)
-+0x50 : dwRenderQualityGraphicMode        (uint32)
-+0x54 : dwParticleQualityGraphicMode      (uint32)
-+0x58 : dwResolutionGraphicMode           (uint32)
-+0x5c : dwFPSGraphicMode                  (uint32)
++0x08 : id                              (uint32)
++0x0c : type                            (uint32)
++0x18 : paramMin1 / +0x1c : paramMax1   (int32)
++0x20 : paramMin2 / +0x24 : paramMax2   (int32)
++0x28 : paramMin3 / +0x2c : paramMax3   (int32)
++0x30 : deviceLevel                     (uint32)
++0x34 : supportsFPS60                  (uint32)
++0x38 : supportsParticleHD             (uint32)
++0x3c : recommendGraphicMode            (uint32)
++0x40 : renderQualityPerfMode    (uint32)
++0x44 : particleQualityPerfMode  (uint32)
++0x48 : resolutionPerfMode       (uint32)
++0x4c : fpsPerfMode              (uint32)
++0x50 : renderQualityGraphicMode        (uint32)
++0x54 : particleQualityGraphicMode      (uint32)
++0x58 : resolutionGraphicMode           (uint32)
++0x5c : fpsGraphicMode                  (uint32)
 +0x60 : szConfig                        (System.String*)
 ```
 

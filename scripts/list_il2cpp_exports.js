@@ -2,25 +2,11 @@
 //
 // Doesn't hook anything - just enumerates the exports (and symbols, if any)
 // of UnityFramework to find the real name of il2cpp_init in the current
-// build.
+// build. Build this with `npm run build` and run the bundled
+// dist/list_il2cpp_exports.js - see README.md's "Building the agents"
+// section.
 
-function main() {
-    let mod;
-    try {
-        mod = Process.getModuleByName("UnityFramework");
-        scan(mod);
-    } catch (e) {
-        console.log("[i] UnityFramework not loaded yet - waiting for module observer...");
-        const observer = Process.attachModuleObserver({
-            onAdded(m) {
-                if (m.name === "UnityFramework") {
-                    observer.detach();
-                    scan(m);
-                }
-            },
-        });
-    }
-}
+import { waitForModule } from "./_lib.js";
 
 function scan(mod) {
     console.log("[+] UnityFramework base =", mod.base, " size =", mod.size);
@@ -56,4 +42,4 @@ function scan(mod) {
     console.log("[+] Scan complete. Script can exit now.");
 }
 
-main();
+waitForModule("UnityFramework", scan);

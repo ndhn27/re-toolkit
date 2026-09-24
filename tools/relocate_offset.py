@@ -9,7 +9,8 @@ How it works:
   1. Disassemble backwards from old_offset in the old build, collecting
      consecutive instructions that do NOT depend on an absolute address
      (skipping adrp/adr/bl/b/cbz/cbnz - these instructions encode a
-     relative offset, which changes if the function moves).
+     relative offset, which changes if the function moves). An undecodable
+     word (literal pool, jump table) also ends the run.
   2. Concatenate those "safe" instructions into a byte string fingerprint.
   3. Search for that exact byte string in the new build.
   4. If it matches EXACTLY ONCE, print the new offset = match position +
@@ -47,22 +48,27 @@ def is_pc_relative(insn):
 
 
 def build_fingerprint(old_path, old_offset, min_instrs, lookback_window=64):
-    with open(old_path, "rb") as f:
-        f.seek(max(0, old_offset - lookback_window))
-        chunk = f.read(lookback_window)
-
-    md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
-    insns = list(md.disasm(chunk, max(0, old_offset - lookback_window)))
-    insns = [i for i in insns if i.address < old_offset]  # only keep the part before old_offset
-
-    if not insns:
+    base = max(0, old_offset - lookback_window)
+    if old_offset - base < INSTR_LEN:
         raise RuntimeError("Could not disassemble anything before old_offset - increase lookback_window.")
 
-    # Walk backwards from the instruction closest to the offset, stopping
-    # as soon as a PC-relative instruction is hit.
+    with open(old_path, "rb") as f:
+        f.seek(base)
+        chunk = f.read(old_offset - base)
+
+    md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+
+    # Walk backwards from the instruction closest to the offset, stopping as
+    # soon as a PC-relative instruction OR an undecodable word is hit.
+    # AArch64 is fixed-width, so decode one word at a time: md.disasm() on the
+    # whole chunk silently stops at the first undecodable word (literal pool,
+    # jump table, ...), and the bytes after it - never checked for
+    # PC-relative instructions - would end up in the fingerprint.
     safe_insns = []
-    for insn in reversed(insns):
-        if is_pc_relative(insn):
+    for addr in range(old_offset - INSTR_LEN, base - 1, -INSTR_LEN):
+        word = chunk[addr - base:addr - base + INSTR_LEN]
+        insn = next(md.disasm(word, addr), None)
+        if insn is None or is_pc_relative(insn):
             break
         safe_insns.insert(0, insn)
 

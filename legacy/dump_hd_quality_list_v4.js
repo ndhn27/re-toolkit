@@ -1,6 +1,6 @@
 // dump_hd_quality_list_v4.js
 //
-// v3 was still wrong: many different dwID values were producing the SAME
+// v3 was still wrong: many different id values were producing the SAME
 // repeated "len" value - a sign that several records point at a handful of
 // shared strings, and that the length offset within System.String was
 // being read WRONG (the String header might also be only 8 bytes, like
@@ -51,12 +51,12 @@ function installHook(mod) {
             const rec = this.recordPtr;
             try {
                 count++;
-                const dwID = rec.add(0x08).readU32();
-                const chEnable = rec.add(0x18).readS8();
+                const id = rec.add(0x08).readU32();
+                const enabled = rec.add(0x18).readS8();
                 const namePtr = rec.add(0x20).readPointer();
                 const key = namePtr.toString();
 
-                console.log(`[${count}] dwID=${dwID}  chEnable=${chEnable}  namePtr=${namePtr}${seenNamePtrs.has(key) ? "  (already dumped)" : ""}`);
+                console.log(`[${count}] id=${id}  enabled=${enabled}  namePtr=${namePtr}${seenNamePtrs.has(key) ? "  (already dumped)" : ""}`);
 
                 if (!namePtr.isNull() && !seenNamePtrs.has(key)) {
                     seenNamePtrs.add(key);

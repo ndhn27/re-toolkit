@@ -4,10 +4,10 @@
 // actually at +0x20 (szName, a System.String), NOT +0x18. This matches the
 // class's declared member order exactly - IL2CPP wasn't reordering fields
 // as previously suspected, it's simply that every field (including the
-// sbyte chEnable) occupies a full 8-byte slot:
-//   +0x08 dwID              (uint,  padded to 8 bytes)
+// sbyte enabled) occupies a full 8-byte slot:
+//   +0x08 id              (uint,  padded to 8 bytes)
 //   +0x10 szName_ByteArray  (byte[], observed to always be NULL)
-//   +0x18 chEnable          (sbyte, padded to 8 bytes - read the low byte)
+//   +0x18 enabled          (sbyte, padded to 8 bytes - read the low byte)
 //   +0x20 szName            (string - the REAL device name)
 
 const FRIDA_OFFSET = 0x0; // <-- SET THIS: build-specific, find via Ghidra
@@ -64,15 +64,15 @@ function installHook(mod) {
             const rec = this.recordPtr;
             try {
                 count++;
-                const dwID = rec.add(0x08).readU32();
-                const chEnable = rec.add(0x18).readS8();
+                const id = rec.add(0x08).readU32();
+                const enabled = rec.add(0x18).readS8();
                 const namePtr = rec.add(0x20).readPointer();
                 const name = tryAsIl2CppString(namePtr);
 
-                const marker = chEnable !== 0 ? "  * ENABLED" : "";
-                if (chEnable !== 0) enabledCount++;
+                const marker = enabled !== 0 ? "  * ENABLED" : "";
+                if (enabled !== 0) enabledCount++;
 
-                console.log(`[${count}] dwID=${dwID}  chEnable=${chEnable}  szName="${name}"${marker}`);
+                console.log(`[${count}] id=${id}  enabled=${enabled}  szName="${name}"${marker}`);
 
                 if (count === 1) {
                     const bytes = rec.readByteArray(0x30);
@@ -83,7 +83,7 @@ function installHook(mod) {
             }
 
             if (count % 50 === 0) {
-                console.log(`--- Processed ${count} records, ${enabledCount} with chEnable != 0 ---`);
+                console.log(`--- Processed ${count} records, ${enabledCount} with enabled != 0 ---`);
             }
         },
     });

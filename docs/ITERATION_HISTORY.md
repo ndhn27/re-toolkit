@@ -22,10 +22,10 @@ Short version of what happened at each step:
 3. **v3** — Realized the hexdump rows had been miscounted: the field with
    real string data is at `+0x20`, not `+0x18`. It turned out IL2CPP
    wasn't reordering fields at all — every field, including the
-   single-byte `chEnable` flag, simply occupies a full 8-byte slot, which
+   single-byte `enabled` flag, simply occupies a full 8-byte slot, which
    matches the class's declared member order exactly.
 
-4. **v4** — Multiple different `dwID`s were producing the *same* string
+4. **v4** — Multiple different `id`s were producing the *same* string
    length repeatedly, suggesting either shared/interned strings or (more
    likely) a wrong length-field offset within `System.String` itself.
    Stopped guessing offsets and instead dumped raw hex at each *new*

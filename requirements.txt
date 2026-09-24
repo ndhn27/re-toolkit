@@ -1,3 +1,3 @@
-frida
-frida-tools
-capstone
+frida>=16.0.0
+frida-tools>=12.0.0
+capstone>=5.0.0
