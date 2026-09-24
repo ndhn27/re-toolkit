@@ -212,10 +212,10 @@ forward when the app updates.)
 docstrings/usage examples of `tools/_common.py`, `tools/relocate_offset.py`,
 and `tools/run_hd_quality_dump.py`, and in the fixtures under `tests/`, is
 the same fictional example value reused for illustration only — it is not
-a real offset from the original investigation. Unlike `scripts/*.js` and
+a real offset from the original investigation. Unlike the JS/TS files and
 `tools/config.py`, `check_placeholders.py` does not scan the README, the
-`tools/` docstrings, or `tests/` (see "Checks exactly what README.md tells
-you to edit" in its own docstring), so don't mistake its presence in those
+`tools/` docstrings, or `tests/` (see "Which files" in its own
+docstring), so don't mistake its presence in those
 files for something that's been placeholder-checked - it's just a
 made-up number used consistently in usage examples and test data.
 
@@ -223,9 +223,27 @@ The placeholders described above (`com.example.unitygame`, `FRIDA_OFFSET =
 0x0`, etc.) only stay placeholders if nobody forgets to reset them before
 committing. Beyond the runtime `if (OFFSET === 0x0) throw ...` guards
 already in `scripts/*.js` — which only catch it at *run* time, and only for
-whoever runs it — `tools/check_placeholders.py` checks the same two things
-(`scripts/*.js` / `legacy/*.js` offset constants, and `tools/config.py`'s
-`TARGET` / `FRIDA_OFFSET`) *before* a real value can land in git history:
+whoever runs it — `tools/check_placeholders.py` checks, *before* a real
+value can land in git history:
+
+- **Every JS/TS file in the repo** (not just `scripts/` and `legacy/`, so
+  moving a file is no way around it): any number that looks like a code
+  address (a literal of `0x10000` or more, in code, in a string, in a
+  comment, in a table, however it's written), plus any `offset`/RVA-named
+  constant (`FRIDA_OFFSET`, `OFFSET_GetFoo`, `HOOK_RVA`, ...) that isn't a
+  zero placeholder. The struct-field table (`const OFFSETS = { ... }`) is
+  still allowed to live in git, but every entry has to be `0x1000` or less;
+  tables must be named `*Offsets`.
+- **`tools/config.py`**: `TARGET` must be `"com.example.unitygame"` and
+  `FRIDA_OFFSET` must be zero, however they're written (type hints,
+  tuple-unpacking, line breaks, ...).
+
+Some things are deliberately exempt (powers of two, masks like
+`0xffffffff`, Mach-O/ELF magics). If a legitimate number of yours gets
+blocked — say a `100000` ms timeout — write it as an expression
+(`100 * 1000`) rather than asking for an exemption.
+
+It runs in two places:
 
 - **Locally**, as a pre-commit hook. Install once per clone (from the repo
   root):
