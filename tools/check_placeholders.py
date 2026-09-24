@@ -10,14 +10,12 @@ committed at all.
 
 Why it looks at values, not just names
 --------------------------------------
-Earlier versions found an "offset-looking" *line* (`const NAME = VALUE;`)
-and judged VALUE. Every round of review found another spelling that dodged
-the line pattern: `export const`, a name like HOOK_RVA, the value on the
-next line, a second declaration on the same line, a table or `[x][0]`
-(which the old code deliberately skipped), a renamed file (git status `R`),
-a type-hinted `FRIDA_OFFSET: int = ...` in config.py. Patching one shape at
-a time can't converge, so the checks are layered so that no single
-spelling matters:
+Finding an "offset-looking" *line* (`const NAME = VALUE;`) and judging VALUE
+is easy to dodge: `export const`, a name like HOOK_RVA, the value on the
+next line, a second declaration on the same line, a table or `[x][0]`, a
+renamed file (git status `R`), a type-hinted `FRIDA_OFFSET: int = ...` in
+config.py. Patching one shape at a time can't converge, so the checks are
+layered so that no single spelling matters:
 
   Layer 1 - by VALUE, independent of any syntax (JS/TS files):
       Any numeric literal >= ADDRESS_LITERAL_MIN (0x10000) anywhere in the
@@ -82,8 +80,7 @@ What this does NOT do (no static check can; this one aims at "by accident",
 not at someone deliberately obfuscating). A legitimate number that trips
 layer 1 (a 100000 ms timeout, an AArch64 instruction word like 0xd65f03c0)
 is meant to be rewritten as an expression (`100 * 1000`) or bytes, not
-exempted - an exemption list is exactly the kind of gap this file used to
-have:
+exempted - an exemption list is itself a gap:
   - a value assembled at runtime or split up (`0xab68 << 16 | 0xfc8`,
     `parseInt("ab68fc8", 16)` with no 0x prefix, scientific notation) -
     only a *named* constant expression is judged, and only unprefixed hex

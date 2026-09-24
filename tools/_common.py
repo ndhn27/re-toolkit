@@ -25,6 +25,7 @@ Two jobs:
 import argparse
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 
@@ -141,3 +142,31 @@ def load_agent_source(path, offset=None):
                   "using the agent's own file contents as-is.")
 
     return source
+
+
+def is_gitignored(path):
+    """Ask git whether `path` is covered by .gitignore.
+
+    True / False when git can tell, None when it can't (git isn't installed,
+    or `path` isn't inside a git work tree). Uses `git check-ignore`, so it
+    reflects the repo's real .gitignore rules rather than a guess at them.
+    """
+    path = os.path.abspath(path)
+    cwd = os.path.dirname(path)
+    while cwd and not os.path.isdir(cwd):  # the output dir may not exist yet
+        parent = os.path.dirname(cwd)
+        if parent == cwd:
+            return None
+        cwd = parent
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "--", path],
+            cwd=cwd, capture_output=True, text=True,
+        )
+    except OSError:  # no git on PATH
+        return None
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None  # 128: not a repository / path outside it

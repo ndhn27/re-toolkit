@@ -17,8 +17,8 @@ Usage:
 
 AGENT_PATH is resolved from this file's own location (via __file__), not
 the current working directory - see run_hd_quality_dump.py's docstring
-for why (`python tools/list_exports.py` from the repo root used to raise
-a FileNotFoundError because "../dist/..." was resolved against the CWD).
+for why (a "../dist/..." path would be resolved against the CWD and raise
+FileNotFoundError when run from the repo root).
 """
 import argparse
 import time

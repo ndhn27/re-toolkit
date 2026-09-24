@@ -5,7 +5,7 @@ No device, no Frida and no real binary needed - this only exercises the
 CLI/env/config.py precedence logic (_pick/resolve_settings/add_override_args)
 and the FRIDA_OFFSET-injection regex in load_agent_source() against small
 in-memory/tmp_path fixtures, same spirit as the other test files in this
-directory. Previously nothing in tests/ imported this module at all.
+directory.
 
 Run from the repo root:
 
@@ -170,3 +170,37 @@ def test_load_agent_source_missing_offset_constant_is_a_noop(tmp_path, capsys):
 
     assert source == original
     assert "no FRIDA_OFFSET constant found" in capsys.readouterr().out
+
+
+# --- is_gitignored ---
+
+def _git(cwd, *argv):
+    import subprocess
+    subprocess.run(["git", *argv], cwd=cwd, check=True, capture_output=True)
+
+
+def test_is_gitignored_true_for_a_covered_name(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / ".gitignore").write_text("records*.json\n")
+
+    assert common.is_gitignored(tmp_path / "records_ab68fc8.json") is True
+
+
+def test_is_gitignored_false_for_an_uncovered_name(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / ".gitignore").write_text("records*.json\n")
+
+    assert common.is_gitignored(tmp_path / "dump_ab68fc8.json") is False
+
+
+def test_is_gitignored_works_when_the_output_dir_does_not_exist_yet(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / ".gitignore").write_text("records*.json\n")
+
+    assert common.is_gitignored(tmp_path / "not" / "made" / "yet" / "records.json") is True
+
+
+def test_is_gitignored_none_outside_a_git_repo(tmp_path):
+    # tmp_path has no .git anywhere above it (pytest's tmp dirs live under
+    # /tmp) - git can't answer, so the driver must stay quiet, not warn.
+    assert common.is_gitignored(tmp_path / "records.json") is None

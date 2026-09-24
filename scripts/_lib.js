@@ -76,17 +76,23 @@ export function waitForModule(moduleName, onReady) {
 
 /**
  * True if `retval` - the raw return value Frida's `Interceptor.attach`
- * hands to `onLeave` - means an `...$$unpack` call FAILED, where the
- * convention (confirmed for every hook in this project - see
- * docs/MEMORY_LAYOUT.md) is 0 = success.
+ * hands to `onLeave` - means an `...$$unpack` call FAILED.
  *
- * `retval` is a NativePointer wrapping the full-width return register,
- * not a 32-bit int. `retval.toInt32() !== 0` - the check every agent used
- * to use - truncates to the low 32 bits first, so on a 64-bit target a
- * return value whose low 32 bits are zero but whose upper bits aren't
- * would be misread as "0 = success" even though the real 64-bit value is
- * non-zero. `retval.isNull()` compares the whole native word against
- * zero instead, so it can't be fooled that way.
+ * ASSUMPTION: 0 = success. That's what the hooks in this project were
+ * written against, but it is NOT recorded anywhere as verified (neither in
+ * docs/MEMORY_LAYOUT.md nor in the iteration history) - re-check it against
+ * your own build. If every record shows up as `[skip]`, suspect this first.
+ *
+ * `retval` is a NativePointer wrapping the full-width return register, and
+ * the whole word is compared against zero. That is right if unpack returns
+ * a 64-bit value (a pointer, an int64). It is too strict if unpack returns a
+ * 32-bit `int`/`bool`: AArch64 does not guarantee the upper 32 bits of x0
+ * for such a return, so a genuine "0 = success" could show up non-zero here.
+ * In practice a write to w0 zeroes the upper half, so this is unlikely, but
+ * this file can't tell which case your build is - which is why
+ * createSkipLogger() below spells out when only the upper half is non-zero.
+ * If that's what you see, switch this to a low-32-bit test:
+ * `retval.and(0xffffffff).isNull()` is the equivalent of `toUInt32() === 0`.
  */
 export function unpackFailed(retval) {
     return !retval.isNull();
@@ -95,10 +101,8 @@ export function unpackFailed(retval) {
 /**
  * Returns a function to call from `onLeave` whenever `unpackFailed()` is
  * true, so a failed unpack() is counted and logged instead of being
- * dropped with zero trace (the previous behavior for
- * dump_hd_quality_list.js / dump_recommend_config.js was `return;` with
- * no log line at all - indistinguishable from the hook simply never
- * firing, e.g. because of a wrong FRIDA_OFFSET). `what` is a short label
+ * dropped silently - a silent `return;` is indistinguishable from the hook
+ * simply never firing, e.g. because of a wrong FRIDA_OFFSET. `what` is a short label
  * (the record type name) included in the log line so it's clear which
  * hook is skipping when an agent hooks more than one function.
  */
@@ -106,8 +110,18 @@ export function createSkipLogger(what) {
     let skipped = 0;
     return function logSkip(retval) {
         skipped++;
+        // Low 32 bits zero but the full word isn't: unpackFailed() flagged a
+        // value that would read as 0 if unpack returns a 32-bit int/bool.
+        // Say so, instead of leaving the reader to guess why every record
+        // is being dropped (see unpackFailed()'s doc comment).
+        const upperOnly = retval.and(0xffffffff).isNull();
+        const hint = upperOnly
+            ? " - only the UPPER 32 bits are non-zero: if unpack returns int/bool " +
+              "rather than a 64-bit value this is unspecified register garbage, not a " +
+              "failure; switch unpackFailed() to a low-32-bit test"
+            : "";
         console.log(`[skip] ${what} unpack() returned ${retval} (expected 0) - ` +
-            `record dropped (total skipped so far: ${skipped})`);
+            `record dropped (total skipped so far: ${skipped})${hint}`);
     };
 }
 

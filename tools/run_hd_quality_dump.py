@@ -6,11 +6,11 @@ via rpc.exports (i.e. dump_hd_quality_list.js or dump_recommend_config.js,
 bundled), and streams its console output live. Press Enter at any point to
 pull the accumulated table via RPC, write it to a JSON file, and detach.
 
-NOTE: the original version of this script had a mismatched docstring/
-AGENT_PATH (it said "v5" but actually loaded dump_selection_logic.js, which
-has no rpc.exports and would fail on script.exports_sync.get_count()). This
-version makes the target script explicit - pick it with --agent (default:
-AGENT_PATH below) - and it must be one that exposes rpc.exports.
+Pick the target script with --agent (default: AGENT_PATH below). It must be an
+agent that exposes rpc.exports (getCount/getRecords/clear): that is
+dump_hd_quality_list.js or dump_recommend_config.js. dump_selection_logic.js,
+the probe and list_il2cpp_exports.js don't, and would fail at the
+get_count() call.
 
 The agent must be the *bundled* one under dist/, built with
 `npm run build` from the corresponding scripts/*.js source (see README.md's
@@ -36,6 +36,12 @@ than a bare array, so a records.json from one dump can't get silently
 mixed up with one from a different build/offset later - see `meta` below.
 When trying several offsets in a row, give each run its own --out so the
 next run doesn't overwrite the previous dump.
+
+Lifecycle: if anything fails between spawn and resume (attach, script
+creation, script load - e.g. a hook that can't be installed at the given
+offset), the still-suspended process is killed rather than left frozen, and
+the session is always detached on the way out. Ctrl+C at the "press Enter"
+prompt is treated like Enter: the records collected so far are exported.
 
 Usage:
     python run_hd_quality_dump.py --offset 0xab68fc8
@@ -67,7 +73,7 @@ from typing import TYPE_CHECKING
 
 import frida
 
-from _common import add_override_args, load_agent_source, resolve_settings
+from _common import add_override_args, is_gitignored, load_agent_source, resolve_settings
 
 if TYPE_CHECKING:
     # Only needed to resolve the type comment on `recs` below - guarding it
@@ -90,52 +96,14 @@ def on_message(message, data):
         print(message.get("payload"))
 
 
-def main():
-    ap = argparse.ArgumentParser(
-        description="Spawn the game, stream a bundled Frida agent's output, and "
-                    "export its collected records to JSON when you press Enter.")
-    add_override_args(ap, offset=True)
-    ap.add_argument("--agent", default=AGENT_PATH, metavar="PATH",
-                    help=f"bundled agent under dist/ to load "
-                         f"(default: {Path(AGENT_PATH).relative_to(REPO_ROOT)})")
-    ap.add_argument("--out", default=OUT_PATH, metavar="PATH",
-                    help=f"where to write the exported JSON (default: {OUT_PATH})")
-    args = ap.parse_args()
-    settings = resolve_settings(args, offset=True)
-
-    if settings.offset == 0:
-        # Fail here rather than after spawning the app: the agent itself
-        # refuses to hook at 0x0, so there's nothing useful to do with it.
-        sys.exit("[!] Offset is 0x0 - pass --offset, set $FRIDA_OFFSET, or set "
-                 "FRIDA_OFFSET in config.py. Not spawning the app.")
-
-    source = load_agent_source(args.agent, settings.offset)
-
-    device = frida.get_device_manager().add_remote_device(settings.remote_addr)
-
-    def on_detached(reason):
-        print(f"[!] Session detached, reason: {reason}")
-
-    print(f"[*] Spawning {settings.target}...")
-    pid = device.spawn([settings.target])
-    session = device.attach(pid)
-    session.on("detached", on_detached)
-
-    script = session.create_script(source)
-    script.on("message", on_message)
-    script.load()
-
-    device.resume(pid)
-    print(f"[*] Spawned and resumed, pid={pid}")
-    print("[*] Listening - new records print immediately. Play through the game normally.")
-    print("[*] Press Enter at any point to export the records and exit.\n")
-
-    input()
-
+def export_records(script, settings, args):
+    """Pull the accumulated table over RPC and write it, wrapped with `meta`,
+    to args.out. Errors are reported, not raised: the caller still has to
+    detach."""
     try:
         count = script.exports_sync.get_count()
         print(f"[*] Collected {count} unique records. Exporting...")
-        # Shape depends on which agent was loaded (--agent above): a list of
+        # Shape depends on which agent was loaded (--agent): a list of
         # DeviceQualityRecord for dump_hd_quality_list.js, or
         # RecommendConfigRecord for dump_recommend_config.js - see
         # tools/records.py. Not asserted/validated at runtime, same as the
@@ -156,8 +124,80 @@ def main():
     except Exception as e:
         print("[!] Error retrieving data (does the loaded agent expose rpc.exports?):", e)
 
-    session.detach()
-    print("[*] Detached.")
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Spawn the game, stream a bundled Frida agent's output, and "
+                    "export its collected records to JSON when you press Enter.")
+    add_override_args(ap, offset=True)
+    ap.add_argument("--agent", default=AGENT_PATH, metavar="PATH",
+                    help=f"bundled agent under dist/ to load "
+                         f"(default: {Path(AGENT_PATH).relative_to(REPO_ROOT)})")
+    ap.add_argument("--out", default=OUT_PATH, metavar="PATH",
+                    help=f"where to write the exported JSON (default: {OUT_PATH})")
+    args = ap.parse_args()
+    settings = resolve_settings(args, offset=True)
+
+    if settings.offset == 0:
+        # Fail here rather than after spawning the app: the agent itself
+        # refuses to hook at 0x0, so there's nothing useful to do with it.
+        sys.exit("[!] Offset is 0x0 - pass --offset, set $FRIDA_OFFSET, or set "
+                 "FRIDA_OFFSET in config.py. Not spawning the app.")
+
+    if is_gitignored(args.out) is False:
+        # The export's `meta` records the real target and offset, and
+        # check_placeholders.py deliberately doesn't scan .json - so a dump
+        # under a name .gitignore doesn't cover is one `git add -A` away from
+        # being committed. (`records*.json` is covered.)
+        print(f"[!] --out {args.out} is NOT covered by .gitignore, and the export records "
+              f"the real target + offset in `meta`. Keep it out of git - or use a "
+              f"records*.json name.")
+
+    source = load_agent_source(args.agent, settings.offset)
+
+    device = frida.get_device_manager().add_remote_device(settings.remote_addr)
+
+    def on_detached(reason):
+        print(f"[!] Session detached, reason: {reason}")
+
+    print(f"[*] Spawning {settings.target}...")
+    pid = device.spawn([settings.target])
+    resumed = False
+    session = None
+    try:
+        session = device.attach(pid)
+        session.on("detached", on_detached)
+
+        script = session.create_script(source)
+        script.on("message", on_message)
+        script.load()
+
+        device.resume(pid)
+        resumed = True
+        print(f"[*] Spawned and resumed, pid={pid}")
+        print("[*] Listening - new records print immediately. Play through the game normally.")
+        print("[*] Press Enter at any point to export the records and exit.\n")
+
+        try:
+            input()
+        except KeyboardInterrupt:
+            print("\n[*] Interrupted - exporting what was collected so far.")
+
+        export_records(script, settings, args)
+    finally:
+        if not resumed:
+            # Never resumed: the app is still suspended at spawn. Don't leave
+            # it frozen behind a failed attach/load.
+            try:
+                device.kill(pid)
+            except Exception:
+                pass
+        if session is not None:
+            try:
+                session.detach()
+                print("[*] Detached.")
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

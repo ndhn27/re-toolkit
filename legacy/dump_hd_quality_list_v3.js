@@ -3,11 +3,11 @@
 // FIX vs v2: miscounted the hexdump rows - the field with real data is
 // actually at +0x20 (szName, a System.String), NOT +0x18. This matches the
 // class's declared member order exactly - IL2CPP wasn't reordering fields
-// as previously suspected, it's simply that every field (including the
-// sbyte enabled) occupies a full 8-byte slot:
-//   +0x08 id              (uint,  padded to 8 bytes)
+// as previously suspected. Fields follow declaration order with natural
+// alignment (pointers on 8-byte boundaries, padding after the small ones):
+//   +0x08 id              (uint,  followed by 4 bytes of padding)
 //   +0x10 szName_ByteArray  (byte[], observed to always be NULL)
-//   +0x18 enabled          (sbyte, padded to 8 bytes - read the low byte)
+//   +0x18 enabled          (sbyte, followed by 7 bytes of padding)
 //   +0x20 szName            (string - the REAL device name)
 
 const FRIDA_OFFSET = 0x0; // <-- SET THIS: build-specific, find via Ghidra

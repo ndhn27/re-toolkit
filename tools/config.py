@@ -28,6 +28,6 @@ REMOTE_ADDR = "127.0.0.1:27042"
 # being hooked by whichever scripts/*.js agent you're running via
 # run_hd_quality_dump.py. Find this yourself via Ghidra's Symbol Table
 # for your own build — see docs/ITERATION_HISTORY.md for the methodology
-# originally used to find it. Leave at 0x0 and the driver/agent will refuse
+# for finding it. Leave at 0x0 and the driver/agent will refuse
 # to run with a reminder, instead of silently hooking the wrong address.
 FRIDA_OFFSET = 0x0  # <-- SET THIS

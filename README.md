@@ -128,7 +128,7 @@ This won't run against anything as-is — it's a worked example to copy the
   adapting it to Android.
 - Node.js 18+ and npm, to bundle the agents in `scripts/` into `dist/` via
   `frida-compile` (see "Building the agents" below).
-- Python 3.8+ with the packages in `requirements.txt`.
+- Python 3.9+ with the packages in `requirements.txt`.
 - The Frida CLI (`frida`, `frida-ps`, etc.) if you want to attach manually
   instead of via the provided Python drivers.
 - Ghidra (or similar) with the IL2CPP binary + `dump.cs` loaded, to find
@@ -195,7 +195,10 @@ edit to `scripts/*.js` or `scripts/_lib.js`.
      (default `records.json`) — give each attempt its own `--out` when
      probing several offsets, otherwise the next run overwrites the last
      dump. Example: `python run_hd_quality_dump.py --offset ab68fc8 --out
-     records_ab68fc8.json`; or
+     records_ab68fc8.json`. Keep the name matching `records*.json`: that's
+     what `.gitignore` covers, and the export's `meta` holds the real target
+     and offset (the driver prints a warning at startup if your `--out` isn't
+     git-ignored); or
    - Attach manually with the Frida CLI, having set `FRIDA_OFFSET` directly
      in the script's own `const` line before building instead:
      `frida -R -f com.example.unitygame -l dist/dump_hd_quality_list.js`
@@ -254,7 +257,10 @@ It runs in two places:
 
 - **In CI**, via `.github/workflows/check-placeholders.yml`, which runs the
   same script on every push/PR — a backstop for a clone that never
-  installed the hook, or a commit made with `--no-verify`.
+  installed the hook, or a commit made with `--no-verify`. The same
+  workflow also runs `pytest` (Python 3.9 and the latest 3.x) and a full
+  `npm run build`, checking that the two RPC agents' bundles still contain
+  the `const FRIDA_OFFSET = 0x0;` line the driver rewrites.
 
 Both call `tools/check_placeholders.py` directly, so there's one source of
 truth; see that file's docstring for exactly what it checks (and, just as
@@ -279,11 +285,14 @@ how `build_fingerprint` picks the safe run in front of the offset (barrier
 instructions, undecodable words, `--min-instrs`, `--lookback`, start/end of
 file) and how `find_new_offset` / `main` behave with 0, 1 and several matches.
 
-`tests/` also covers two smaller things, both dependency-free (no capstone
-needed): `test_check_placeholders.py` exercises the pre-commit/CI check
-from "Keeping real offsets out of git" above against fixture files, and
+`tests/` also covers smaller things, all dependency-free (no capstone or
+Frida needed): `test_check_placeholders.py` exercises the pre-commit/CI
+check from "Keeping real offsets out of git" above against fixture files,
 `test_records_schema.py` diffs the JSDoc/`TypedDict` record shapes from
-"Record shapes" below against each other.
+"Record shapes" below against each other, `test_common.py` covers the
+CLI/env/`config.py` precedence and the `FRIDA_OFFSET` injection, and
+`test_run_hd_quality_dump.py` pins the driver's spawn/resume/detach
+lifecycle against a stubbed `frida` module.
 
 ## Record shapes
 

@@ -65,7 +65,7 @@ def test_js_probe_style_padded_zero_is_clean(tmp_path):
 
 
 def test_js_offset_table_object_is_not_flagged(tmp_path):
-    # Regression: a named struct-field-offset *table* (as in
+    # A named struct-field-offset *table* (as in
     # dump_hd_quality_list.js's `const OFFSETS = { id: 0x08, ... }`) is not
     # a build-specific secret like FRIDA_OFFSET - it must not be flagged
     # just because its multi-line object literal doesn't parse as zero.
@@ -153,12 +153,11 @@ def test_config_py_missing_file_is_a_noop(tmp_path):
     assert violations == []
 
 
-# --- Regression tests for bypasses that slipped past the old block-list
-# regexes (decimal / `_` separators / BigInt `n` / `ptr(...)` / `let` /
-# lowercase identifiers / single-quoted TARGET / a quoted-string offset in
-# config.py). The old checker required matching a *specific shape* of "real
-# value"; these all write the same real value in some other, equally valid
-# shape it never accounted for.
+# --- Alternate spellings of a real value (decimal / `_` separators / BigInt
+# `n` / `ptr(...)` / `let` / lowercase identifiers / single-quoted TARGET / a
+# quoted-string offset in config.py). The checker judges the *value*, not one
+# specific shape of "real value"; each of these writes the same real value in
+# a different, equally valid shape and must be blocked.
 
 def test_js_decimal_offset_is_blocked(tmp_path):
     f = tmp_path / "agent.js"
@@ -276,10 +275,9 @@ def test_config_py_lowercase_identifiers_are_still_checked(tmp_path):
     assert len(violations) == 2
 
 
-# --- Regression tests for `--staged` reading the git index, not the
-# working tree (previously `path.read_text()` always read whatever was on
-# disk, so `--staged` gave the wrong answer whenever disk and index
-# disagreed).
+# --- `--staged` reads the git index, not the working tree: a value that is
+# staged but reset on disk must still be blocked, and one only edited on disk
+# must not be flagged.
 
 def _init_repo(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -316,11 +314,10 @@ def test_unstaged_worktree_edit_is_not_flagged(tmp_path, monkeypatch):
 
 
 def test_config_py_staged_real_value_is_blocked_even_after_worktree_reset(tmp_path, monkeypatch):
-    # Same regression as test_staged_real_value_is_blocked_even_after_worktree_reset
-    # above, but for tools/config.py's own --staged path. Both tests above
-    # only ever stage a file under scripts/, so check_config_py's call to
-    # _read_text(path, staged=True) (`git show :tools/config.py`) was never
-    # actually exercised - this closes that gap.
+    # Same property as test_staged_real_value_is_blocked_even_after_worktree_reset
+    # above, but for tools/config.py's own --staged path: the tests above
+    # only stage a file under scripts/, so this is what exercises
+    # check_config_py's _read_text(path, staged=True) (`git show :tools/config.py`).
     _init_repo(tmp_path)
     (tmp_path / "tools").mkdir()
     f = tmp_path / "tools" / "config.py"
@@ -335,11 +332,11 @@ def test_config_py_staged_real_value_is_blocked_even_after_worktree_reset(tmp_pa
 
 
 # ===========================================================================
-# Round 3: bypasses found by running the real pre-commit hook. The earlier
-# tests above each pinned one *spelling*; these pin the *classes* the checker
-# now closes: (1) any address-sized literal, whatever surrounds it; (2)
-# offset-named assignments however they're declared; (3) which files get
-# looked at and how they're listed; (4) config.py via ast, not regex.
+# Classes of bypass the checker closes. The tests above each pin one
+# *spelling*; these pin the *classes*: (1) any address-sized literal,
+# whatever surrounds it; (2) offset-named assignments however they're
+# declared; (3) which files get looked at and how they're listed; (4)
+# config.py via ast, not regex.
 # ===========================================================================
 import pytest  # noqa: E402  (kept next to the tests that use it)
 
@@ -363,7 +360,7 @@ def _cfg(tmp_path, src):
 
 
 JS_BLOCKED = {
-    # -- the shapes reported against the previous round
+    # -- shapes that dodge a plain `const NAME = VALUE;` line pattern
     "export const":               f"export const FRIDA_OFFSET = {REAL};",
     "HOOK_RVA name":              f"const HOOK_RVA = {REAL};",
     "camelCase rva name":         f"const hookRva = {REAL};",
@@ -573,8 +570,9 @@ def test_staged_rename_into_another_directory_is_blocked(tmp_path, monkeypatch):
     "agent.ts", "src/deep/er/agent.js", "scripts/agent.mjs", "scripts/日本語 tệp.js",
 ])
 def test_staged_js_anywhere_and_any_filename_is_checked(tmp_path, monkeypatch, name):
-    # Only scripts/*.js and legacy/*.js used to be looked at; a non-ASCII name
-    # is C-quoted by plain `--name-only` and matched no file at all.
+    # Any staged .js is checked, not just scripts/*.js and legacy/*.js; a
+    # non-ASCII name is C-quoted by plain `--name-only`, so the file list
+    # must be read in a form that keeps it matchable.
     _init_repo(tmp_path)
     monkeypatch.setattr(cp, "REPO_ROOT", tmp_path)
     f = tmp_path / name
@@ -585,7 +583,7 @@ def test_staged_js_anywhere_and_any_filename_is_checked(tmp_path, monkeypatch, n
 
 
 def test_staged_file_that_is_gone_from_the_worktree_is_still_checked(tmp_path, monkeypatch):
-    # The file list used to come from globbing the working tree.
+    # The file list comes from the git index, not from globbing the working tree.
     _init_repo(tmp_path)
     monkeypatch.setattr(cp, "REPO_ROOT", tmp_path)
     f = tmp_path / "scripts" / "ghost.js"

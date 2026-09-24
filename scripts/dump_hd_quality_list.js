@@ -13,6 +13,7 @@
 // Record layout (DeviceQualityAllowList entry):
 //   +0x00 : klass
 //   +0x08 : id      (uint32)  - numeric record id
+//   +0x10 : (unused byte[]* field, observed NULL)
 //   +0x18 : enabled  (int8)    - HD render quality on/off flag
 //   +0x20 : name      (System.String*) - device name/identifier
 //
@@ -56,7 +57,7 @@ const OFFSETS = {
     namePtr: 0x20,
 };
 
-const { records, rpcExports } = /** @type {import("./_lib.js").RecordStore<DeviceQualityRecord>} */ (createRecordStore());
+const { records, put, rpcExports } = /** @type {import("./_lib.js").RecordStore<DeviceQualityRecord>} */ (createRecordStore());
 const logSkip = createSkipLogger("DeviceQualityAllowList");
 
 function installHook(mod) {
@@ -83,9 +84,15 @@ function installHook(mod) {
                 /** @type {DeviceQualityRecord} */
                 const record = { id, enabled, name };
 
-                const isNew = !records.has(id);
-                records.set(id, record);
+                const { isNew, changed } = put(record);
 
+                if (changed) {
+                    // Same id re-sent with different contents - either a
+                    // real server-side update or `id` isn't unique here;
+                    // the newer record has replaced the older one.
+                    console.log(`[!] id ${id} re-sent with DIFFERENT contents - replaced ` +
+                        `(name="${name}")`);
+                }
                 // Only log on a brand-new id - avoids spamming re-sent
                 // records (the server may push the whole table again).
                 if (isNew) {

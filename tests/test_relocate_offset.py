@@ -309,9 +309,9 @@ class TestBuildFingerprint:
 
     @needs_undecodable
     def test_undecodable_word_does_not_leak_unchecked_bytes(self, tmp_path):
-        # Regression: capstone's disasm() stops at the first undecodable word,
-        # so the old code never looked at the `bl` after BAD and put it in the
-        # fingerprint anyway (reporting "4 instructions, 28 bytes").
+        # capstone's disasm() stops at the first undecodable word, so a
+        # naive scan never looks at the `bl` after BAD and would put it in
+        # the fingerprint anyway (reporting "4 instructions, 28 bytes").
         # Correct behaviour: only the trailing ADD is a safe, decoded
         # instruction -> not enough for min_instrs=4.
         words = [BL] + [ADD] * 4 + [BAD, BL, ADD, NOP]

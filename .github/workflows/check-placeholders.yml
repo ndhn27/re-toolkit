@@ -1,12 +1,16 @@
 name: CI
 
-# Two independent checks on every push/PR:
+# Three independent checks on every push/PR:
 #  - check-placeholders: backstop for people who never ran
 #    `git config core.hooksPath .githooks`, or who committed with
 #    --no-verify - see tools/check_placeholders.py for what's checked.
 #  - tests: the pytest suite in tests/ - including the fixtures that
-#    exercise check_placeholders.py itself, which previously only ran
-#    locally, never in CI.
+#    exercise check_placeholders.py itself. Runs on the oldest supported
+#    Python (3.9) and the latest 3.x.
+#  - build: `npm run build` (frida-compile) for every agent, so a broken
+#    import graph or bundling failure fails CI, plus a check that the two
+#    rpc agents' bundles still contain the exact `const FRIDA_OFFSET = 0x0;`
+#    line that tools/_common.py's load_agent_source() rewrites with a regex.
 on:
   push:
   pull_request:
@@ -22,15 +26,43 @@ jobs:
 
   tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.x"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install test dependencies
         run: pip install -r requirements-dev.txt
 
       - name: Run pytest
         run: pytest
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build all agents
+        run: npm run build
+
+      - name: Bundles keep the injectable FRIDA_OFFSET line
+        run: |
+          for f in dist/dump_hd_quality_list.js dist/dump_recommend_config.js; do
+            grep -q 'const FRIDA_OFFSET = 0x0;' "$f" || {
+              echo "::error file=$f::bundle no longer contains 'const FRIDA_OFFSET = 0x0;' - load_agent_source() would silently fail to inject the offset"
+              exit 1
+            }
+          done

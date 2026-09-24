@@ -20,10 +20,12 @@ Short version of what happened at each step:
    results side by side to compare by eye.
 
 3. **v3** — Realized the hexdump rows had been miscounted: the field with
-   real string data is at `+0x20`, not `+0x18`. It turned out IL2CPP
-   wasn't reordering fields at all — every field, including the
-   single-byte `enabled` flag, simply occupies a full 8-byte slot, which
-   matches the class's declared member order exactly.
+   real string data is at `+0x20`, not `+0x18`. IL2CPP wasn't reordering
+   fields at all — the layout follows the class's declared member order
+   with natural alignment (a `uint32` at `+0x08`, a pointer at `+0x10`, an
+   `int8` at `+0x18`, a pointer at `+0x20`), and the padding after the
+   small fields is what made every field look like it had a full 8-byte
+   slot.
 
 4. **v4** — Multiple different `id`s were producing the *same* string
    length repeatedly, suggesting either shared/interned strings or (more

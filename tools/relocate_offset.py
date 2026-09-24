@@ -83,10 +83,9 @@ def is_pc_relative(insn):
 
     This is the single source of truth for that classification (see
     test_relocate_offset.py's is_pc_relative_* tests) - don't duplicate the
-    mnemonic list elsewhere as a plain set/tuple; a previous such constant
-    here went unused and, worse, was wrong (missed most b.<cond> variants
-    and couldn't tell literal-pool ldr from base-register ldr - the exact
-    distinction handled below)."""
+    mnemonic list elsewhere as a plain set/tuple: a flat list can't express
+    the b.<cond> variants or tell literal-pool ldr from base-register ldr -
+    the exact distinction handled below."""
     if insn.mnemonic in ("adrp", "adr", "bl", "cbz", "cbnz", "tbz", "tbnz"):
         return True
     if insn.mnemonic == "b" or insn.mnemonic.startswith("b."):
