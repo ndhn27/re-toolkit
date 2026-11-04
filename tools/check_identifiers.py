@@ -346,7 +346,7 @@ def main(argv=None):
         print("BLOCKED: a name from a real target is in the tree:\n", file=sys.stderr)
         for f in findings:
             print(f"  - {f}", file=sys.stderr)
-        print("\nKeep real names in a private profile (README.md, \"Profiles\") and use the "
+        print("\nKeep real names in a private profile (docs/PROFILES.md) and use the "
               "neutral ones here. Re-run with --show locally to see what matched.", file=sys.stderr)
         return 1
 

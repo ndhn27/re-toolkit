@@ -6,7 +6,7 @@
 // This agent contains no target-specific value. The RVA to hook, the module
 // to wait for and the record layout all arrive in rpc.exports.init(stage,
 // params), which retk dump calls with what it read from your profile
-// (a JSON file kept outside git - see README.md's "Profiles"):
+// (a JSON file kept outside git - see docs/PROFILES.md):
 //
 //   offsets.table_a        RVA of the unpack function - its address in Ghidra's
 //                          Symbol Table with Image Base = 0, i.e. relative to the
@@ -14,7 +14,7 @@
 //                          "RVA vs file offset")
 //   names.methods.table_a  (optional) the same function BY NAME - the IL2CPP runtime is asked
 //                          for its address first and offsets.table_a is the fallback
-//                          (_resolve.js; README.md's "Looking things up by name")
+//                          (_resolve.js; docs/NAME_LOOKUP.md)
 //   layouts.records.TableARecord   where each field of a record lives, and its `key`
 //
 // Records are logged as JSON, so this file names no field either: a profile can

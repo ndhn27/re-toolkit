@@ -16,8 +16,7 @@
 // offsets.resolve_default, from your profile - this file holds no
 // target-specific value. A profile may also name them (names.methods.lookup_by_pattern /
 // resolve_default): the IL2CPP runtime is asked for the address first and the RVA is the
-// fallback (_resolve.js; README.md's "Looking things up by name"). Build with `npm run build` (README.md's "Building
-// the agents"), then attach the bundled dist/trace_lookup.js with the Frida CLI
+// fallback (_resolve.js; docs/NAME_LOOKUP.md). Build with `npm run build` (docs/INSTALL.md), then attach the bundled dist/trace_lookup.js with the Frida CLI
 // - NOT through retk dump, which exports a collected table and this
 // agent collects nothing (the driver refuses it before resuming the app):
 //
@@ -25,7 +24,7 @@
 //         -P "$(retk profile params NAME)"
 //
 // `profiles.py params` takes the same `--offset KEY=HEX` / `--module` overrides
-// as the drivers (README.md's "Usage"), for trying an RVA without editing the
+// as the drivers (docs/USAGE.md), for trying an RVA without editing the
 // profile.
 //
 // Both hooked functions return a pointer to a full TableBRecord, but only the

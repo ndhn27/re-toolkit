@@ -42,8 +42,7 @@ sample, so the gate uses the looser GATE_TOLERANCE - it is there to stop a layou
 that is wrong about almost everything, not to second-guess one stray record; the
 export-time judgement with `--layout-tolerance` still decides the final verdict.
 
-Field offsets from the runtime. When the profile names a record's fields (`names.fields`, README.md's
-"Looking things up by name"), the agent also asks the IL2CPP runtime where each of them is
+Field offsets from the runtime. When the profile names a record's fields (`names.fields`, docs/NAME_LOOKUP.md), the agent also asks the IL2CPP runtime where each of them is
 (scripts/_resolve.js) and its health carries `field_offsets`. Those are not samples: the runtime
 states the offset, so ONE mismatch fails the check whatever the tolerance, and a match is
 noted as confirmed directly. A field the runtime could not be asked about is a note, never a verdict.

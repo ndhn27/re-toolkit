@@ -15,8 +15,7 @@
 // The RVA of ...$$unpack (from Ghidra's Symbol Table, using Image Base = 0; an
 // RVA, not a file offset - see README.md's "RVA vs file offset") arrives in
 // rpc.exports.init(stage, params) as offsets.probe, from your profile - this
-// file holds no target-specific value. Build with `npm run build` (README.md's
-// "Building the agents"), then attach the bundled dist/probe_record.js with the
+// file holds no target-specific value. Build with `npm run build` (docs/INSTALL.md), then attach the bundled dist/probe_record.js with the
 // Frida CLI - NOT through retk dump, which exports a collected table and
 // this agent only prints (the driver refuses it before resuming the app):
 //

@@ -8,8 +8,7 @@ output live. Press Enter at any point to pull the accumulated table via RPC,
 write it to a JSON file, and detach.
 
 What the agent needs - the RVA to hook, the module, the record layout - comes
-from your PROFILE (--profile NAME; see profiles.py and README.md's
-"Profiles"): a JSON file kept outside git. Nothing target-specific is ever
+from your PROFILE (--profile NAME; see profiles.py and docs/PROFILES.md): a JSON file kept outside git. Nothing target-specific is ever
 compiled into an agent or written into this repo.
 
 Pick the agent with --agent (default: AGENT_PATH below). It must expose
@@ -18,11 +17,11 @@ dump_table_b.js. trace_lookup.js, probe_record.js and list_il2cpp_exports.js
 don't - they only print - and this driver says so right after the agent has
 been loaded, before the app is resumed (and kills the still-suspended app),
 instead of letting you use the app for a while and fail at export. Run those
-with `frida -P` (see README.md's "Usage"; `retk profile params NAME --offset
+with `frida -P` (see docs/USAGE.md; `retk profile params NAME --offset
 KEY=HEX` takes the same overrides as --offset here) or, for
 list_il2cpp_exports.js, `retk exports`. The agent must be the *bundled*
 one (dist/ in a checkout, built with `npm run build` from the corresponding
-scripts/*.js source - see README.md's "Building the agents"; inside the package
+scripts/*.js source - see docs/INSTALL.md; inside the package
 when installed) - not scripts/ directly, which uses ES module imports that only
 resolve after bundling. --agent takes a path or just the bundle's name
 (`--agent dump_table_b.js`), looked up where the bundles are.
@@ -49,11 +48,11 @@ don't have to edit the profile between attempts:
                         field and/or the live instances of the record's class) instead of hooking the
                         unpack - for an attach that comes after the app unpacked everything. Needs
                         --attach; uses dist/snapshot_records.js; exits 5, writing nothing, when it finds no
-                        record (README.md's "Snapshot"). --snapshot-timeout SECONDS (default 120)
+                        record (docs/SNAPSHOT.md). --snapshot-timeout SECONDS (default 120)
 
 A profile may also NAME its hook points (`Namespace.Class::Method`): the agent then asks the
 IL2CPP runtime for the address first and uses the RVA only as the fallback (scripts/_resolve.js;
-README.md's "Looking things up by name"). This driver prints where each hook point came from,
+docs/NAME_LOOKUP.md). This driver prints where each hook point came from,
 records the RVAs that were really hooked in `meta.offsets` and the evidence in `meta.resolution`,
 and exits with status 4 - after writing what it has - when a hook point ended with no address at
 all (the name did not resolve and the profile has no RVA to fall back to, or `--resolve names`).
@@ -235,7 +234,7 @@ def require_dump_agent(run, agent_path):
             f"{os.path.basename(agent_path)} exposes no getCount()/getRecords() ({e}), so there is "
             f"nothing for this driver to export. run_dump.py is for dump_table_a.js / "
             f"dump_table_b.js; attach the others with `frida -P \"$(retk profile "
-            f"params NAME --offset KEY=HEX)\"` (README.md, \"Usage\") or use `retk exports`") from e
+            f"params NAME --offset KEY=HEX)\"` (docs/USAGE.md) or use `retk exports`") from e
 
 
 def take_snapshot(script, timeout, poll=0.25, sleep=time.sleep, clock=time.monotonic, say=print):

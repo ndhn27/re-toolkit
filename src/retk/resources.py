@@ -92,7 +92,7 @@ def missing_agent_hint():
         return f"${ENV_AGENTS_DIR} is set to {os.environ[ENV_AGENTS_DIR]!r}: build the agents there, or unset it."
     if checkout_root() is not None:
         return ("Run `npm run build` from the repo root to bundle scripts/ into dist/ "
-                "(see README 'Building the agents').")
+                "(see docs/INSTALL.md, 'Building the agents').")
     return ("This install carries no agent bundles (it was built without Node.js, or with RETK_SKIP_AGENTS=1). "
             "Reinstall from a checkout with Node.js 20+ and npm on PATH - `pip install .` builds them - "
             f"or point ${ENV_AGENTS_DIR} at a folder of built bundles.")

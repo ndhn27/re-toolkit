@@ -9,7 +9,7 @@
 //     retk dump --profile myapp --attach <process> --snapshot
 //
 // Like every agent here it names no target-specific value: the parameters arrive in
-// rpc.exports.init(stage, params) from the profile (README.md's "Snapshot"):
+// rpc.exports.init(stage, params) from the profile (docs/SNAPSHOT.md):
 //
 //   snapshot.record   which record of layouts.records to read (e.g. "TableARecord")
 //   snapshot.static   (optional) {namespace, class, assembly?, field, container: object | array | list}

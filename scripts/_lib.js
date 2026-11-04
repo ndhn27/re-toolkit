@@ -2,8 +2,8 @@
 //
 // Shared helpers for the Frida agents in this project. This file is NOT a
 // standalone agent — it's imported by the entry-point scripts and bundled
-// into dist/ via `npm run build` (frida-compile). See README.md's
-// "Building the agents" section before trying to `frida -l` anything in
+// into dist/ via `npm run build` (frida-compile). See docs/INSTALL.md
+// ("Building the agents") before trying to `frida -l` anything in
 // scripts/ directly; the raw files here use ES module imports and won't
 // load as-is.
 //

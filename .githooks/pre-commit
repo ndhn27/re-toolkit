@@ -2,7 +2,7 @@
 # Pre-commit hook: blocks a commit that adds a name taken from a real target
 # (tools/check_identifiers.py - see it for exactly what is checked and why).
 # Offsets, layouts and the package id are never in the tree to begin with: they
-# live in a profile outside git (README.md, "Profiles").
+# live in a profile outside git (docs/PROFILES.md).
 #
 # This directory isn't wired up automatically - git only looks in
 # .git/hooks/, which isn't tracked. Install once per clone with:

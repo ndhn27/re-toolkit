@@ -4,7 +4,7 @@
 // of the app's IL2CPP module (the profile's `module`; there is no default) to
 // find the real name of il2cpp_init in the current build. Build this with
 // `npm run build` and run the bundled dist/list_il2cpp_exports.js through
-// retk exports - see README.md's "Building the agents" section. It
+// retk exports - see docs/INSTALL.md. It
 // needs only `module` from rpc.exports.init(stage, params).
 
 import { waitForModule, parseParams, agentInit } from "./_lib.js";

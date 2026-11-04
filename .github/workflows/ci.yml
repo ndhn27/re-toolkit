@@ -4,7 +4,7 @@ name: CI
 #  - names: tools/check_identifiers.py - no name taken from a real target (the
 #    one thing that can still leak by typing it; offsets, layouts and the
 #    package id never enter the tree at all - they live in a profile outside
-#    git, see README.md's "Profiles").
+#    git, see docs/PROFILES.md).
 #  - tests: ruff (tool config in pyproject.toml) and the pytest suite in tests/,
 #    including the tests that run the real agents under Node against a fake
 #    process image and tests/test_frida_real.py, which runs them under real
@@ -40,7 +40,9 @@ jobs:
         run: python3 tools/check_identifiers.py
 
   tests:
-    runs-on: ubuntu-latest
+    # Pinned: actions/setup-python has no Python 3.9 build for Ubuntu 26.04, which is what
+    # ubuntu-latest now is. 24.04 has one. Move this when 3.9 is dropped.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -114,7 +116,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]  # 24.04, not -latest: no Python 3.9 on 26.04
         python-version: ["3.9", "3.x"]
     defaults:
       run:

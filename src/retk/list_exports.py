@@ -2,8 +2,7 @@
 list_exports.py
 
 Spawns the target app, loads the bundled dist/list_il2cpp_exports.js (built with
-`npm run build` from scripts/list_il2cpp_exports.js - see README.md's
-"Building the agents"), and waits until the agent reports `scan-complete`
+`npm run build` from scripts/list_il2cpp_exports.js - see docs/INSTALL.md), and waits until the agent reports `scan-complete`
 (or until --wait seconds elapse). No RPC call involved - it reads console
 messages, plus one `{event: "scan-complete"}` send from the agent when
 the IL2CPP module has been enumerated.

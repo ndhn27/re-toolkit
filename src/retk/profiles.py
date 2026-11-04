@@ -33,7 +33,7 @@ ones are ignored.
 
 A profile may also say WHERE the same functions are by name - the optional `names`
 section. With it the agent asks the IL2CPP runtime for the address first and uses the
-RVA only as the fallback (README.md's "Looking things up by name"):
+RVA only as the fallback (docs/NAME_LOOKUP.md):
 
     "names": {
       "methods": {"table_a": "ExampleNamespace.ExampleTableA::Unpack/1"},   # an offsets key -> Class::Method
@@ -80,7 +80,7 @@ ENV_PROFILES_DIR = paths.ENV_PROFILES_DIR
 DEFAULT_REMOTE = "127.0.0.1:27042"
 
 # The library that holds the IL2CPP runtime, by platform. THIS TABLE IS THE ONLY PLACE THESE
-# NAMES ARE TYPED IN CODE (the README and docstrings quote them for people; the agents' hints
+# NAMES ARE TYPED IN CODE (the docs and docstrings quote them for people; the agents' hints
 # keep a copy in scripts/_lib.js, RUNTIME_MODULES; tests/test_module_lookup.py fails when a
 # code string elsewhere repeats one, or when the two tables differ).
 PLATFORM_MODULES = {
@@ -103,7 +103,7 @@ NO_MODULE_HELP = ("no module name - set `module` in your profile or pass --modul
                   + ")")
 
 
-# How an agent finds the address to hook (README.md's "Looking things up by name"):
+# How an agent finds the address to hook (docs/NAME_LOOKUP.md):
 #   auto   the name first, the profile's RVA when the name cannot be resolved (the default);
 #   names  the name only - an agent that cannot resolve it refuses instead of falling back;
 #   rva    the profile's RVA only, names ignored (what the toolkit did before names existed).
@@ -469,7 +469,7 @@ def agent_params(profile, module=None, offsets=None, resolve=None, snapshot=None
 
 
 def main(argv=None, prog=None):
-    ap = argparse.ArgumentParser(prog=prog, description="Inspect a profile, or start one (README.md, \"Profiles\").")
+    ap = argparse.ArgumentParser(prog=prog, description="Inspect a profile, or start one (docs/PROFILES.md).")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("init", help="create NAME.json in the profiles folder from the example profile")
     p.add_argument("name", metavar="NAME", help="the profile's name (what --profile NAME takes)")

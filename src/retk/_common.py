@@ -82,11 +82,11 @@ def add_override_args(parser, offsets=True, resolve=False, build_cache=False):
             "--resolve", choices=profiles.RESOLVE_MODES, default=None,
             help="how the agent finds what to hook: 'auto' (default) asks the IL2CPP runtime for "
                  "the profile's `names` first and falls back to the RVA when it cannot; 'names' "
-                 "never falls back; 'rva' ignores the names (README.md: \"Looking things up by name\")")
+                 "never falls back; 'rva' ignores the names (docs/NAME_LOOKUP.md)")
     if build_cache:
         group.add_argument(
             "--build-cache", choices=buildcache.MODES, default="auto",
-            help="the per-build record outside the repo (README.md: \"Builds the toolkit has seen\"): 'auto' "
+            help="the per-build record outside the repo (docs/PROFILES.md): 'auto' "
                  "(default) hooks the addresses a verified run recorded for this exact build, if any, and records "
                  "this run's once its dump passes the layout check; 'rescan' looks everything up again and "
                  "records the result; 'off' neither reads nor writes it. A name or an RVA you gave "
@@ -122,7 +122,7 @@ def resolve_settings(args):
 
     target = args.target or (profile.target if profile else None) or getattr(args, "attach", None)
     if not target:
-        sys.exit("[!] no target: pass --profile NAME (see README.md, \"Profiles\") or --target ID")
+        sys.exit("[!] no target: pass --profile NAME (see docs/PROFILES.md) or --target ID")
     remote = args.remote or (profile.remote if profile else profiles.DEFAULT_REMOTE)
     overrides = dict(getattr(args, "offset", None) or [])
     module = getattr(args, "module", None)
@@ -237,7 +237,7 @@ def load_agent_source(path):
     dist/ in a checkout, the package's agents/ folder when installed), not the raw
     source under scripts/ - the scripts/ files import shared helpers from
     scripts/_lib.js via ES module `import`, which only resolves after
-    `npm run build` (see README.md's "Building the agents"). Loading a raw
+    `npm run build` (see docs/INSTALL.md). Loading a raw
     scripts/*.js path here directly will fail with an unresolved import.
     """
     try:
@@ -318,7 +318,7 @@ def attach_agent(device, process, source, on_message, on_detached=None, params=N
     """Attach to a process that is ALREADY running, load the agent `source`, hand it `params` through
     rpc.exports.init with the stage "late" (the app's runtime is up; scripts/_resolve.js needs to know), and
     yield an AgentRun - the counterpart of spawn_agent() for an attach that comes after the app has done its
-    work (README.md's "Snapshot").
+    work (docs/SNAPSHOT.md).
 
     The process is never killed and never resumed: it was not spawned here, so on the way out - however the
     block ends - the session is detached and nothing else touched. Cleanup errors are swallowed so they

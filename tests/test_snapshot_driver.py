@@ -1,5 +1,5 @@
 """
-The Python side of the snapshot mode (README.md's "Snapshot"): taking the table out of an app that is
+The Python side of the snapshot mode (docs/SNAPSHOT.md): taking the table out of an app that is
 ALREADY running, instead of hooking its unpack and waiting for a call that will not come again.
 
   * the profile's `names.snapshot` section and what the agent receives from it;

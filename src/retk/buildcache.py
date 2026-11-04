@@ -383,7 +383,7 @@ def cmd_list(args):
 
 
 def main(argv=None, prog=None):
-    ap = argparse.ArgumentParser(prog=prog, description="The per-build cache and where retk keeps things (README.md, \"Builds the toolkit has seen\").")
+    ap = argparse.ArgumentParser(prog=prog, description="The per-build cache and where retk keeps things (docs/PROFILES.md).")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("where", help="print where this machine keeps profiles and builds").set_defaults(fn=cmd_where)
     p = sub.add_parser("key", help="print the build id of a binary (64-bit Mach-O or ELF64)")

@@ -70,7 +70,7 @@ def build_agents():
         npm = shutil.which("npm")
         if npm is None:
             raise SetupError("npm was not found on PATH: the Frida agents are bundled with Node.js (20 or newer, "
-                             f"see README 'Requirements'). Install Node, or install without the agents: "
+                             f"see docs/INSTALL.md, 'Requirements'). Install Node, or install without the agents: "
                              f"{ENV_SKIP_AGENTS}=1 pip install .")
         if not (ROOT / "node_modules" / "frida-compile").is_dir():
             run_npm(npm, "ci")

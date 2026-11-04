@@ -160,7 +160,7 @@ def pick_record(params, key, record):
     known = sorted(((params.get("layouts") or {}).get("records") or {}))
     if not known:
         raise CandidateError("the profile has no `layouts`: verification reads the record through its layout "
-                             "(README.md, \"Profiles\")")
+                             "(docs/PROFILES.md)")
     if name not in known:
         raise CandidateError(f"the profile's layouts define no record {name!r} (it has: {', '.join(known)}) - "
                              f"pass --record NAME")
