@@ -1,0 +1,8 @@
+# What the tests and the linter need, on top of the runtime requirements.
+# The runtime file is included rather than repeated, so a version range lives in one
+# place; it brings frida, which tests/test_frida_real.py runs the agents under.
+-r requirements.txt
+pytest>=7.0
+ruff>=0.6,<1
+# setup.py's build hook is imported by tests/test_setup_hook.py (and `python -m build` / `pip install .` need it anyway)
+setuptools>=77

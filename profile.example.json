@@ -1,0 +1,199 @@
+{
+  "$comment": "Template profile with made-up values: copy it to <name>.json in the profiles/ folder of your user data directory (retk builds where prints it) or anywhere outside the repo, then fill in your target. Every offset is 0x0, which the agents refuse to hook. The layouts below are SYNTHETIC examples for ExampleNamespace.ExampleTableA/B - a real target's layouts, offsets and package id belong only in your own profile, never in this file. headerSize 16 is the stock 64-bit IL2CPP object header (klass + monitor); verify it on your own build. Record and subset names (TableARecord, TableBRecord, LookupResult) are the ones the agents ask for; everything inside them is yours. `expect` on a field (TableARecord has three) is what you OBSERVED about its values: the agents check every record they read against it and retk dump fails the dump when the data contradicts the layout (see retk/layouts.py). `names` is OPTIONAL and says where the same functions are BY NAME: with it the agents ask the IL2CPP runtime for the address first and use `offsets` only as the fallback (README.md, \"Looking things up by name\"); `names.snapshot` says where a RUNNING app holds the table, for scripts/snapshot_records.js (README.md, \"Snapshot\"). Every name here is made up too. See retk/profiles.py.",
+  "target": "com.example.unitygame",
+  "remote": "127.0.0.1:27042",
+  "module": "UnityFramework",
+  "offsets": {
+    "table_a": "0x0",
+    "table_b": "0x0",
+    "probe": "0x0",
+    "lookup_by_pattern": "0x0",
+    "resolve_default": "0x0"
+  },
+  "names": {
+    "methods": {
+      "table_a": "ExampleNamespace.ExampleTableA::Unpack/1",
+      "table_b": "ExampleNamespace.ExampleTableB::Unpack/1",
+      "probe": "ExampleNamespace.ExampleTableA::Unpack/1",
+      "lookup_by_pattern": "ExampleNamespace.ExampleTableB::LookupByPattern/3",
+      "resolve_default": {
+        "class": "ExampleNamespace.ExampleTableB",
+        "method": "ResolveDefault",
+        "args": 0,
+        "assembly": "Assembly-CSharp"
+      }
+    },
+    "fields": {
+      "TableARecord": {
+        "class": "ExampleNamespace.ExampleTableA",
+        "map": { "id": "id", "weight": "weight", "enabled": "enabled", "name": "label" }
+      }
+    },
+    "snapshot": {
+      "TableARecord": {
+        "static": { "class": "ExampleNamespace.ExampleTableB", "field": "all", "container": "list" },
+        "heap": true
+      }
+    }
+  },
+  "layouts": {
+    "headerSize": 16,
+    "il2cppString": {
+      "lengthOffset": "0x10",
+      "charsOffset": "0x14"
+    },
+    "records": {
+      "TableARecord": {
+        "description": "One entry of ExampleNamespace.ExampleTableA, as read from a hooked `...$$unpack` call. A flat table: `id` is unique on its own.",
+        "key": [
+          "id"
+        ],
+        "fields": [
+          {
+            "name": "id",
+            "offset": "0x10",
+            "type": "u32",
+            "doc": "numeric record id",
+            "expect": { "min": 1 }
+          },
+          {
+            "name": "weight",
+            "offset": "0x14",
+            "type": "s32",
+            "doc": "example signed value"
+          },
+          {
+            "name": "enabled",
+            "offset": "0x18",
+            "type": "s8",
+            "doc": "example on/off flag (0 or 1)",
+            "expect": { "oneOf": [0, 1] }
+          },
+          {
+            "name": "name",
+            "offset": "0x20",
+            "type": "string",
+            "doc": "example string field",
+            "expect": { "nonEmpty": true, "maxLength": 64 }
+          }
+        ],
+        "unread": [
+          {
+            "name": "rawBytes",
+            "offset": "0x28",
+            "size": 8,
+            "doc": "byte[]* - an example of a region the agent does not read; the readable text is the System.String in `name`."
+          }
+        ]
+      },
+      "TableBRecord": {
+        "description": "One entry of ExampleNamespace.ExampleTableB, as read from a hooked `...$$unpack` call. `id` is only unique within a `kind`, so records are keyed on both.",
+        "key": [
+          "kind",
+          "id"
+        ],
+        "fields": [
+          {
+            "name": "id",
+            "offset": "0x10",
+            "type": "u32",
+            "doc": "numeric record id"
+          },
+          {
+            "name": "kind",
+            "offset": "0x14",
+            "type": "u32",
+            "doc": "record kind discriminator"
+          },
+          {
+            "name": "lo1",
+            "offset": "0x20",
+            "type": "s32",
+            "doc": ""
+          },
+          {
+            "name": "hi1",
+            "offset": "0x24",
+            "type": "s32",
+            "doc": ""
+          },
+          {
+            "name": "lo2",
+            "offset": "0x28",
+            "type": "s32",
+            "doc": ""
+          },
+          {
+            "name": "hi2",
+            "offset": "0x2c",
+            "type": "s32",
+            "doc": ""
+          },
+          {
+            "name": "level",
+            "offset": "0x30",
+            "type": "u32",
+            "doc": ""
+          },
+          {
+            "name": "flagA",
+            "offset": "0x34",
+            "type": "u32",
+            "doc": "example 0/1 flag"
+          },
+          {
+            "name": "flagB",
+            "offset": "0x38",
+            "type": "u32",
+            "doc": "example 0/1 flag"
+          },
+          {
+            "name": "mode",
+            "offset": "0x3c",
+            "type": "u32",
+            "doc": ""
+          },
+          {
+            "name": "valueA",
+            "offset": "0x40",
+            "type": "u32",
+            "doc": ""
+          },
+          {
+            "name": "valueB",
+            "offset": "0x44",
+            "type": "u32",
+            "doc": ""
+          },
+          {
+            "name": "label",
+            "offset": "0x48",
+            "type": "string",
+            "doc": "example string field"
+          }
+        ],
+        "unread": [
+          {
+            "name": "reserved",
+            "offset": "0x18",
+            "size": 8,
+            "doc": "8-byte region left unread in this example. It is 8-aligned and sits before the first int32 run, which is consistent with a pointer field, but nothing here confirms that - treat an unidentified region as unknown until you read it on your own build."
+          }
+        ]
+      }
+    },
+    "subsets": {
+      "LookupResult": {
+        "of": "TableBRecord",
+        "description": "The fields of TableBRecord that trace_lookup.js watches live. Both functions it hooks return a pointer to a full TableBRecord; only these fields are read.",
+        "fields": [
+          "id",
+          "kind",
+          "level",
+          "valueB",
+          "label"
+        ]
+      }
+    }
+  }
+}

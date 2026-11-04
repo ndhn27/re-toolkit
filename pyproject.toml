@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "re-toolkit"
+dynamic = ["version", "dependencies"]
+description = "Frida tooling for inspecting how a Unity + IL2CPP app loads its configuration tables - the `retk` command"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.urls]
+Homepage = "https://github.com/ndhn27/re-toolkit"
+
+# The one command. cli.py forwards `retk NAME ...` to a tool's main() - see its docstring for the table.
+[project.scripts]
+retk = "retk.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+# One place for each: the version in retk/__init__.py (a release is a tag plus a bump there), the
+# dependencies in requirements.txt - whose exact Frida pins tests/test_frida_version.py guards.
+version = {attr = "retk.__version__"}
+dependencies = {file = ["requirements.txt"]}
+
+# The agent bundles (agents/) and the example profile (data/) are not listed here: they do not exist in the
+# source tree. setup.py's build_py puts them into the wheel - `npm run build`'s dist/ and the repo's
+# profile.example.json - and retk/resources.py finds them, installed or in a checkout.
+
+[tool.ruff]
+target-version = "py39"          # CI's oldest Python
+extend-exclude = ["node_modules", "dist", "build"]
+
+[tool.ruff.lint]
+# What finds real mistakes, not style: syntax/import errors and unused names
+# (E4, E7, E9, F, RUF059), bugbear (B: loop-variable closures, unused loop
+# variables, ...), and stale `# noqa` comments (RUF100). No formatter rules.
+select = ["E4", "E7", "E9", "F", "B", "RUF059", "RUF100"]
+ignore = [
+    "B905",                      # zip(strict=...) needs Python 3.10; CI still runs 3.9
+]

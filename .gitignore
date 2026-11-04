@@ -1,0 +1,18 @@
+node_modules/
+dist/
+# python -m build --outdir wheelhouse, and what a wheel build leaves behind
+wheelhouse/
+build/
+*.egg-info/
+# Private profiles (real names, layouts, offsets) - never commit these. They live in your
+# user data directory now, not here; this is the backstop for an old checkout. See README "Profiles".
+profiles/
+records*.json
+# relocate_offset.py --json / verify_offset.py --json: they name the binaries and offsets of a real target
+relocate*.json
+verify*.json
+# diff_records.py --json: real records of two builds
+diff_records*.json
+*.pyc
+__pycache__/
+.pytest_cache/

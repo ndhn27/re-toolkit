@@ -1,0 +1,10 @@
+# Pinned to the Frida 17 line - exact versions, not ranges. The Python `frida` here and the
+# `frida-server` on the device must be the same major version, and should be the same release:
+# put frida-server 17.25.1 on the device. frida-tools 14.11.0 itself asks for frida>=17.10,<18.
+# To move either pin: change both here, run `pytest` (tests/test_frida_real.py runs the agents
+# under the pinned Frida) and `npm run build`, then update the frida-server on the device.
+frida==17.25.1
+frida-tools==14.11.0
+capstone>=5.0.0,<6.0.0
+# Where profiles and the per-build records live: the user's data directory, per operating system.
+platformdirs>=4.0,<5

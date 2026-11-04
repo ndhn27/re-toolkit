@@ -1,0 +1,179 @@
+name: CI
+
+# Four independent checks on every push/PR:
+#  - names: tools/check_identifiers.py - no name taken from a real target (the
+#    one thing that can still leak by typing it; offsets, layouts and the
+#    package id never enter the tree at all - they live in a profile outside
+#    git, see README.md's "Profiles").
+#  - tests: ruff (tool config in pyproject.toml) and the pytest suite in tests/,
+#    including the tests that run the real agents under Node against a fake
+#    process image and tests/test_frida_real.py, which runs them under real
+#    Frida against a small native program built with the runner's gcc (that file
+#    also covers verify_hook.js - the trial hook behind retk verify -
+#    on the runner's own architecture, not on AArch64 iOS/Android). Runs on
+#    the oldest supported Python (3.9) and the latest 3.x, against the Frida that
+#    requirements.txt pins (17.x) - no range, so the real-Frida tests always see the
+#    version the README tells you to put on the device. They also load the bundles
+#    `npm run build` writes to dist/ (the files the drivers actually run), so the
+#    job builds them first.
+#  - build: `npm run build` (frida-compile) for every agent, so a broken import
+#    graph or bundling failure fails CI, plus a check that every bundle still
+#    exposes the `init` the Python drivers call and carries no address.
+#  - package: the real install. Builds the wheel (setup.py runs `npm ci` +
+#    `npm run build` and puts the agents and profile.example.json in), installs
+#    it into an EMPTY virtualenv, and runs the installed `retk` from outside the
+#    checkout: `retk --help` lists every command, each command answers --help,
+#    the wheel carries one bundle per agent in scripts/, and `retk profile init`
+#    works with no repo around. The tests job runs the source tree (pytest.ini
+#    puts src/ on the path); this is the one that proves what a user gets.
+on:
+  push:
+  pull_request:
+
+jobs:
+  names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify no real-target names were committed
+        run: python3 tools/check_identifiers.py
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.x"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Node runs the real agents against a fake process image in
+      # tests/test_layouts.py; with $CI set those tests fail, not skip,
+      # if `node` is missing.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          python -c "import frida; print('frida', frida.__version__)"
+
+      # The bundles the drivers load; tests/test_frida_real.py runs them under real Frida.
+      - name: Build the agents
+        run: |
+          npm ci
+          npm run build
+
+      - name: Lint
+        run: ruff check .
+
+      # With $CI set, tests/test_frida_real.py fails (not skips) if frida, a C
+      # compiler or nm is missing, and with REQUIRE_REAL_FRIDA set it fails too if the
+      # runner forbids ptrace - a green run means Interceptor really ran on the
+      # compiled program, not that the file was skipped. -rs lists any skip.
+      - name: Run pytest
+        env:
+          REQUIRE_REAL_FRIDA: "1"
+          REQUIRE_DIST: "1"
+        run: pytest -rs
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build all agents
+        run: npm run build
+
+      - name: Every bundle exposes init() and holds no address
+        run: |
+          for f in dist/*.js; do
+            grep -q 'init: agentInit(' "$f" || { echo "::error file=$f::bundle has no init export"; exit 1; }
+            if grep -E '0x[0-9a-fA-F]{5,}' "$f" | grep -v '0xffffffff' | grep -q .; then
+              echo "::error file=$f::bundle contains a long hex literal - values belong in the profile"
+              exit 1
+            fi
+          done
+
+  package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.9", "3.x"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build the wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel --outdir wheelhouse
+
+      - name: Install it into an empty environment
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          BIN=$(python -c "import os; print('Scripts' if os.name == 'nt' else 'bin')")
+          echo "BIN=$RUNNER_TEMP/clean/$BIN" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/clean/$BIN/python" -m pip install wheelhouse/*.whl
+
+      # From a folder with no checkout in it: nothing may be imported from src/.
+      - name: retk --help lists every command, and each command answers --help
+        working-directory: ${{ runner.temp }}
+        env:
+          RE_DATA_DIR: ${{ runner.temp }}/retk-data
+        run: |
+          "$BIN/retk" --version
+          "$BIN/retk" --help > help.txt
+          cat help.txt
+          commands=$("$BIN/python" -c "from retk.cli import COMMANDS; print(*[c.name for c in COMMANDS])")
+          test -n "$commands"
+          for c in $commands; do
+            grep -Eq "^ +$c +" help.txt || { echo "::error::retk --help does not list $c"; exit 1; }
+            "$BIN/retk" "$c" --help > /dev/null || { echo "::error::retk $c --help failed"; exit 1; }
+          done
+          "$BIN/python" -m retk --version
+
+      - name: The wheel carries every agent and the example profile
+        run: |
+          site=$("$BIN/python" -c "import retk, os; print(os.path.dirname(retk.__file__))")
+          for f in scripts/*.js; do
+            name=$(basename "$f")
+            case "$name" in _*) continue ;; esac
+            test -s "$site/agents/$name" || { echo "::error::the wheel has no agents/$name"; exit 1; }
+          done
+          test -s "$site/data/profile.example.json"
+
+      - name: A profile can be started and checked with no repo around
+        working-directory: ${{ runner.temp }}
+        env:
+          RE_DATA_DIR: ${{ runner.temp }}/retk-data
+        run: |
+          "$BIN/retk" profile init ci
+          "$BIN/retk" profile layout ci > /dev/null
+          "$BIN/retk" builds where

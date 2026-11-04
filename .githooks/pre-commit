@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Pre-commit hook: blocks a commit that adds a name taken from a real target
+# (tools/check_identifiers.py - see it for exactly what is checked and why).
+# Offsets, layouts and the package id are never in the tree to begin with: they
+# live in a profile outside git (README.md, "Profiles").
+#
+# This directory isn't wired up automatically - git only looks in
+# .git/hooks/, which isn't tracked. Install once per clone with:
+#
+#   git config core.hooksPath .githooks
+#
+# (Run from the repo root. This setting lives in your local, untracked
+# .git/config, so each clone/contributor sets it once for themselves.)
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+python3 "$repo_root/tools/check_identifiers.py" --staged
