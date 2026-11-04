@@ -65,7 +65,7 @@ the matching text.
 
 Wired in two places, both calling this same script:
   - .githooks/pre-commit (staged files only)
-  - .github/workflows/check-placeholders.yml (whole tree, every push/PR)
+  - .github/workflows/ci.yml, job `names` (whole tree, every push/PR)
 
 Usage:
     python3 tools/check_identifiers.py            # whole tree (git-aware)

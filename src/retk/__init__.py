@@ -3,4 +3,4 @@
 Kept free of imports on purpose: `retk --help` must not load frida or capstone, and setup.py reads
 __version__ from here at build time."""
 
-__version__ = "3.1.0.dev0"
+__version__ = "1.1.0"

@@ -1,7 +1,7 @@
 # What a source distribution carries so that a wheel can be built from it (setup.py runs `npm run build`
 # on scripts/) and the tests can run: the agent sources and their lock, the example profile, the
 # requirements that pyproject.toml reads, and the docs/tests/tools of the repo. Not dist/ or node_modules/.
-include LICENSE README.md pytest.ini
+include LICENSE README.md CHANGELOG.md pytest.ini
 include requirements.txt requirements-dev.txt profile.example.json
 include package.json package-lock.json
 recursive-include scripts *.js

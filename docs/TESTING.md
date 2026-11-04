@@ -175,6 +175,7 @@ file (`test_frida_real.py`, below); everywhere else it is faked:
   ELF, Mach-O without an arm64 slice and non-ARM64 PE files are refused, for
   either binary, with the reason; every AArch64 container still passes.
 - `test_check_identifiers.py` — the name check, with made-up names (no real name
-  appears in the tests).
+  appears in the tests), and a guard that every workflow file the tree refers to
+  exists in `.github/workflows/`.
 - `test_terminology.py` — keeps "RVA" (the hook address) and "file offset" (what
   `retk relocate` works in) from being mixed up in comments and docs.

@@ -2,25 +2,25 @@
 
 # 🔬 re-toolkit
 
-**Read-only Frida tooling for inspecting how Unity + IL2CPP apps load their configuration tables.**
+**Observe-only Frida tooling for inspecting how Unity + IL2CPP apps load their configuration tables.**
 
 ![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white)
 ![Frida 17.25.1](https://img.shields.io/badge/frida-17.25.1-E4002B)
 ![Node 20+](https://img.shields.io/badge/node-20%2B-339933?logo=nodedotjs&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-[🚀 Quick start](#quick-start) · [🧰 Commands](#commands) · [📚 Documentation](#documentation) · [🧪 Development](#development)
+[Quick start](#quick-start) · [Commands](#commands) · [Documentation](#documentation) · [Development](#development)
 
 </div>
 
-`retk` hooks a target app's own `...$$unpack` and lookup functions at runtime, reads the records they fill in, and exports them as JSON. It is **read-only instrumentation**: nothing patches the binary or writes into the process.
+`retk` hooks a target app's own `...$$unpack` and lookup functions at runtime, reads the records they fill in, and exports them as JSON. It is **observe-only, but it is still runtime instrumentation**. It never modifies the binary on disk, and its hooks never change the app's arguments, return values or data. It does run inside the target process: Frida injects an agent, `Interceptor.attach` rewrites the code at each hook site in memory, the agents use scratch allocations there, and name lookup and snapshots call the runtime's own IL2CPP API (which can have side effects such as class initialisation).
 
-- 🎯 **Dump** - spawn or attach, collect a table, export JSON; or snapshot an app that is already running
-- 🧭 **Relocate** - find a hook point again after an app update (AArch64), by bytes or by `Class::Method` name
-- ✅ **Verify** - trial-hook candidate offsets in the live app and see which ones the app really calls
-- 🔀 **Diff** - semantic diff of two dumps, with schema-drift detection
-- 🛡️ **Self-checking** - a layout check tells you when what was read no longer fits the profile
-- 🔒 **Private by design** - no target value lives in this repo; profiles live in your user data directory
+- **Dump** - spawn or attach, collect a table, export JSON; or snapshot an app that is already running
+- **Relocate** - find a hook point again after an app update (AArch64), by bytes or by `Class::Method` name
+- **Verify** - trial-hook candidate offsets in the live app and see which ones the app really calls
+- **Diff** - semantic diff of two dumps, with schema-drift detection
+- **Self-checking** - a layout check tells you when what was read no longer fits the profile
+- **Private by design** - no target value lives in this repo; profiles live in your user data directory
 
 > **This is a generic template.** The package id, classes, lookup functions, layouts and every offset in [`profile.example.json`](profile.example.json) are placeholders (offsets are `0x0`, layouts are synthetic). Nothing here is taken from, or usable as-is against, any particular app.
 
@@ -96,22 +96,23 @@ They coincide only for code in a thin Mach-O slice such as the iOS `UnityFramewo
 
 ## Documentation
 
-| | Doc | What's inside |
-|---|---|---|
-| 🛠️ | [INSTALL](docs/INSTALL.md) | Requirements, install, the Frida 17 pin, building the agents, platform notes |
-| 🧭 | [ADAPTING](docs/ADAPTING.md) | The 7-step walkthrough for a real target |
-| 🧬 | [METHODOLOGY](docs/METHODOLOGY.md) | Working out an unknown record layout; the usual ways a first guess goes wrong |
-| 🗂️ | [PROFILES](docs/PROFILES.md) | Profile format and location; the per-build cache |
-| ▶️ | [USAGE](docs/USAGE.md) | Drivers, flags, the export format, attaching with the Frida CLI |
-| 📸 | [SNAPSHOT](docs/SNAPSHOT.md) | Reading a table out of an app that is already running |
-| 🔎 | [NAME_LOOKUP](docs/NAME_LOOKUP.md) | Finding hook points by `Namespace.Class::Method` instead of by RVA |
-| 🎯 | [RELOCATE_AND_VERIFY](docs/RELOCATE_AND_VERIFY.md) | Re-locating offsets in a new build, then proving them by running them |
-| 🛡️ | [LAYOUT_CHECK](docs/LAYOUT_CHECK.md) | How `retk dump` judges that a layout still fits the build |
-| 🔀 | [DIFF](docs/DIFF.md) | Comparing two dumps; schema-drift findings |
-| 🗺️ | [MEMORY_LAYOUT](docs/MEMORY_LAYOUT.md) | Struct layouts of the example records; run-time layout-check rules |
-| 🧩 | [AGENTS](docs/AGENTS.md) | Every Frida agent script and the full repository layout |
-| 🔒 | [KEEPING_VALUES_OUT_OF_GIT](docs/KEEPING_VALUES_OUT_OF_GIT.md) | The name checker, the pre-commit hook, what CI guards |
-| 🧪 | [TESTING](docs/TESTING.md) | What each test file covers |
+| Doc | What's inside |
+|---|---|
+| [INSTALL](docs/INSTALL.md) | Requirements, install, the Frida 17 pin, building the agents, platform notes |
+| [ADAPTING](docs/ADAPTING.md) | The 7-step walkthrough for a real target |
+| [METHODOLOGY](docs/METHODOLOGY.md) | Working out an unknown record layout; the usual ways a first guess goes wrong |
+| [PROFILES](docs/PROFILES.md) | Profile format and location; the per-build cache |
+| [USAGE](docs/USAGE.md) | Drivers, flags, the export format, attaching with the Frida CLI |
+| [SNAPSHOT](docs/SNAPSHOT.md) | Reading a table out of an app that is already running |
+| [NAME_LOOKUP](docs/NAME_LOOKUP.md) | Finding hook points by `Namespace.Class::Method` instead of by RVA |
+| [RELOCATE_AND_VERIFY](docs/RELOCATE_AND_VERIFY.md) | Re-locating offsets in a new build, then proving them by running them |
+| [LAYOUT_CHECK](docs/LAYOUT_CHECK.md) | How `retk dump` judges that a layout still fits the build |
+| [DIFF](docs/DIFF.md) | Comparing two dumps; schema-drift findings |
+| [MEMORY_LAYOUT](docs/MEMORY_LAYOUT.md) | Struct layouts of the example records; run-time layout-check rules |
+| [AGENTS](docs/AGENTS.md) | Every Frida agent script and the full repository layout |
+| [KEEPING_VALUES_OUT_OF_GIT](docs/KEEPING_VALUES_OUT_OF_GIT.md) | The name checker, the pre-commit hook, what CI guards |
+| [TESTING](docs/TESTING.md) | What each test file covers |
+| [CHANGELOG](CHANGELOG.md) | What changed in each release |
 
 ## Repository layout
 
@@ -123,6 +124,7 @@ docs/                 Guides and reference notes (table above)
 tests/                pytest suite - no device or real binary needed
 tools/                Name checker (check_identifiers.py) and its digest list
 profile.example.json  Template profile: made-up target, every offset 0x0, synthetic layouts
+CHANGELOG.md          Release notes, newest first
 ```
 
 Per-script details: [docs/AGENTS.md](docs/AGENTS.md).

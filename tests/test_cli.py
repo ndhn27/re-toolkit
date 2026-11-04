@@ -48,7 +48,12 @@ def test_no_command_is_a_usage_error_that_names_the_commands(capsys):
 
 def test_a_typo_is_refused_with_the_choices(capsys):
     status, _, err = run(["dumpp"], capsys)
-    assert status == 2 and "invalid choice" in err and "'dump'" in err
+    assert status == 2 and "invalid choice" in err
+    # Every command is offered. How argparse writes that list is not retk's: it quotes each choice
+    # ('dump') in most releases, but some patch releases printed it bare (dump). Don't pin either.
+    offered = err.split("choose from", 1)[-1]
+    for name in NAMES:
+        assert re.search(rf"\b{re.escape(name)}\b", offered), (name, err)
 
 
 def test_version(capsys):

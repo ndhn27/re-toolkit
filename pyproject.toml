@@ -13,6 +13,7 @@ license-files = ["LICENSE"]
 
 [project.urls]
 Homepage = "https://github.com/ndhn27/re-toolkit"
+Changelog = "https://github.com/ndhn27/re-toolkit/blob/main/CHANGELOG.md"
 
 # The one command. cli.py forwards `retk NAME ...` to a tool's main() - see its docstring for the table.
 [project.scripts]

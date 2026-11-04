@@ -27,6 +27,7 @@ tools/      The repo's own scripts, not part of the package: the name checker
 setup.py    The wheel build: runs `npm run build` and puts the bundles and
             profile.example.json into the wheel — see INSTALL.md.
 docs/       Guides and reference notes (this folder), indexed in the README
+CHANGELOG.md  Release notes, newest first.
 tests/      pytest suite: the drivers, profiles and layouts, the real agents
             run under Node against a fake process image, and
             retk relocate (tiny in-memory AArch64 fixtures — no

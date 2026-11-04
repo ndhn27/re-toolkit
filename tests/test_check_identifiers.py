@@ -296,3 +296,20 @@ def test_git_ignored_files_are_not_scanned(tmp_path, monkeypatch):
 def test_shipped_tree_is_clean():
     # The template must pass its own check, tests and docs included.
     assert ci.main([]) == 0
+
+
+def test_every_workflow_file_the_tree_names_exists():
+    # Docs drift: this checker's docstring once pointed at a workflow that had since become ci.yml.
+    named = {}
+    for rel in sorted(set(ci._all_paths())):
+        if ci._skipped(rel):
+            continue
+        data = (ci.REPO_ROOT / rel).read_bytes()
+        if ci._is_binary(data):
+            continue
+        for m in re.finditer(r"\.github/workflows/([\w.\-]+\.ya?ml)", data.decode("utf-8", errors="replace")):
+            named.setdefault(m.group(1), rel)
+    assert named, "expected at least the CI workflow to be named somewhere"
+    missing = {name: rel for name, rel in named.items()
+               if not (ci.REPO_ROOT / ".github" / "workflows" / name).is_file()}
+    assert not missing, f"named but not in .github/workflows/: {missing}"
