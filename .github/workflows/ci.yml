@@ -60,6 +60,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
       - name: Install test dependencies
         run: |
@@ -67,9 +68,12 @@ jobs:
           python -c "import frida; print('frida', frida.__version__)"
 
       # The bundles the drivers load; tests/test_frida_real.py runs them under real Frida.
+      # frida's install script downloads a ~48 MB prebuilt binary from GitHub; if that one
+      # download hiccups it falls through to a source build that cannot work from the npm
+      # tarball (it needs a package-lock.json the tarball does not ship). So retry the install.
       - name: Build the agents
         run: |
-          npm ci
+          npm ci || { sleep 20; rm -rf node_modules; npm ci; } || { sleep 40; rm -rf node_modules; npm ci; }
           npm run build
 
       - name: Lint
@@ -96,7 +100,7 @@ jobs:
           cache: npm
 
       - name: Install JS dependencies
-        run: npm ci
+        run: npm ci || { sleep 20; rm -rf node_modules; npm ci; } || { sleep 40; rm -rf node_modules; npm ci; }
 
       - name: Build all agents
         run: npm run build
@@ -131,6 +135,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
       - name: Build the wheel
         run: |
