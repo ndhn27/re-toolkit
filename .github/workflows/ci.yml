@@ -5,7 +5,7 @@ name: CI
 #    one thing that can still leak by typing it; offsets, layouts and the
 #    package id never enter the tree at all - they live in a profile outside
 #    git, see docs/PROFILES.md).
-#  - tests: ruff (tool config in pyproject.toml) and the pytest suite in tests/,
+#  - tests: ruff and mypy (tool config in pyproject.toml) and the pytest suite in tests/,
 #    including the tests that run the real agents under Node against a fake
 #    process image and tests/test_frida_real.py, which runs them under real
 #    Frida against a small native program built with the runner's gcc (that file
@@ -78,6 +78,9 @@ jobs:
 
       - name: Lint
         run: ruff check .
+
+      - name: Type check
+        run: mypy
 
       # With $CI set, tests/test_frida_real.py fails (not skips) if frida, a C
       # compiler or nm is missing, and with REQUIRE_REAL_FRIDA set it fails too if the

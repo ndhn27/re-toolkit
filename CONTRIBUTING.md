@@ -36,7 +36,7 @@ You need Python 3.9+, Node.js 20+ with npm, and a C compiler (the real-Frida tes
 
 ```bash
 git clone https://github.com/ndhn27/re-toolkit && cd re-toolkit
-pip install -r requirements-dev.txt     # runtime requirements + pytest + ruff
+pip install -r requirements-dev.txt     # runtime requirements + pytest + ruff + mypy
 npm ci && npm run build                 # builds dist/ - what the tests and a checkout load
 git config core.hooksPath .githooks     # once per clone: the name-check pre-commit hook
 ```
@@ -46,6 +46,7 @@ Run the checks CI runs:
 ```bash
 python3 tools/check_identifiers.py      # no real-target names in the tree
 ruff check .                            # lint
+mypy                                    # type check (src/ and tools/; config in pyproject.toml)
 pytest -rs                              # the test suite; -rs lists anything that was skipped
 ```
 

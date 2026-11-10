@@ -47,3 +47,16 @@ select = ["E4", "E7", "E9", "F", "B", "RUF059", "RUF100"]
 ignore = [
     "B905",                      # zip(strict=...) needs Python 3.10; CI still runs 3.9
 ]
+
+[tool.mypy]
+# Checks src/ and tools/ (`mypy`, no arguments). Types are not mandatory: untyped functions are left
+# alone (mypy's default), so this finds real mismatches in what is annotated and in what it can infer
+# without asking for a rewrite. setup.py is left out - it needs types-setuptools for no gain.
+python_version = "3.9"          # CI's oldest Python
+files = ["src", "tools"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["capstone", "capstone.*", "frida", "frida.*"]
+ignore_missing_imports = true   # no type information shipped

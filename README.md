@@ -112,6 +112,7 @@ They coincide only for code in a thin Mach-O slice such as the iOS `UnityFramewo
 | [AGENTS](docs/AGENTS.md) | Every Frida agent script and the full repository layout |
 | [KEEPING_VALUES_OUT_OF_GIT](docs/KEEPING_VALUES_OUT_OF_GIT.md) | The name checker, the pre-commit hook, what CI guards |
 | [TESTING](docs/TESTING.md) | What each test file covers |
+| [MAINTAINING](docs/MAINTAINING.md) | Checks, pins and how a release is made |
 | [CHANGELOG](CHANGELOG.md) | What changed in each release |
 
 ## Repository layout
@@ -132,10 +133,11 @@ Per-script details: [docs/AGENTS.md](docs/AGENTS.md).
 ## Development
 
 ```bash
-pip install -r requirements-dev.txt   # runtime requirements + pytest + ruff
+pip install -r requirements-dev.txt   # runtime requirements + pytest + ruff + mypy
 npm ci && npm run build               # dist/ - what the tests and a checkout load
 pytest
 ruff check .                          # the lint CI runs
+mypy                                  # the type check CI runs
 git config core.hooksPath .githooks   # once per clone: the name-check pre-commit hook
 ```
 

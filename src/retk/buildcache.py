@@ -49,6 +49,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, Dict
 
 from . import buildid
 from . import paths
@@ -56,7 +57,7 @@ SCHEMA_VERSION = 1
 
 # {version: function(raw dict) -> raw dict of version + 1}. Empty: version 1 is the first. When the layout
 # changes, bump SCHEMA_VERSION and add the step from the old version here - old files then keep working.
-MIGRATIONS = {}
+MIGRATIONS: Dict[int, Callable[[dict], dict]] = {}
 
 MODES = ("auto", "rescan", "off")      # --build-cache: use and record / look up again but record / neither
 SOURCES = ("name", "rva", "override", "cache")

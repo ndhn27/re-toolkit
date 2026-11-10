@@ -4,5 +4,7 @@
 -r requirements.txt
 pytest>=7.0
 ruff>=0.6,<1
+# <2: mypy 2 dropped the python_version = "3.9" target that CI's oldest Python needs
+mypy>=1.11,<2
 # setup.py's build hook is imported by tests/test_setup_hook.py (and `python -m build` / `pip install .` need it anyway)
 setuptools>=77

@@ -45,6 +45,7 @@ same table, a wrapper - verifies the same way, which is why a second verified ca
 It is a much stronger statement than a byte match, not a different kind of certainty.
 """
 from dataclasses import dataclass, field
+from typing import Optional
 
 from . import layout_check
 VERIFIED, WEAK, REJECTED, NOT_EXERCISED, CRASHED = "verified", "weak", "rejected", "not_exercised", "crashed"
@@ -76,7 +77,7 @@ class CandidateVerdict:
     evidence: list = field(default_factory=list)      # what a verification stood on
     enters: int = 0                                   # how often the hook fired
     records: int = 0                                  # how many records were read through the layout
-    layout_drift: dict = None                         # layout_check.measure_drift's finding, when there was one
+    layout_drift: Optional[dict] = None                         # layout_check.measure_drift's finding, when there was one
 
     def as_json(self):
         return {"id": self.id, "rva": hex(self.rva), "label": self.label, "status": self.status,

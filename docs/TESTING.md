@@ -177,5 +177,8 @@ file (`test_frida_real.py`, below); everywhere else it is faked:
 - `test_check_identifiers.py` — the name check, with made-up names (no real name
   appears in the tests), and a guard that every workflow file the tree refers to
   exists in `.github/workflows/`.
+- `test_release_consistency.py` — `__version__`, the newest CHANGELOG section and its tag link, the
+  `SECURITY.md` supported-versions row and `package.json` (no version of its own) agree, so a
+  tree or archive cannot ship one release number and document another.
 - `test_terminology.py` — keeps "RVA" (the hook address) and "file offset" (what
   `retk relocate` works in) from being mixed up in comments and docs.

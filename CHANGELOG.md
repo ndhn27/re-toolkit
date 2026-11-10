@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file, newest release 
 Versions are `MAJOR.MINOR.PATCH`. A release is a git tag plus a bump of `__version__` in
 `src/retk/__init__.py`, the one place `pyproject.toml` reads the version from.
 
+## [Unreleased]
+
+### Added
+
+- **Type checking with mypy.** `mypy` (no arguments) checks `src/` and `tools/` with the configuration in
+  `pyproject.toml`, targets Python 3.9 like the linter, and runs as a step of the CI `tests` job. mypy is
+  held below 2 in `requirements-dev.txt` because mypy 2 dropped the 3.9 target. Unannotated functions
+  are not checked, so this adds no annotation requirement for contributors.
+- **`tests/test_release_consistency.py`**: `__version__`, the newest `CHANGELOG.md` section and its link
+  line, the supported-versions row in `SECURITY.md` and the absence of a version in `package.json` must
+  agree. A tree or archive that carries a different version from its changelog now fails the suite.
+- **`docs/MAINTAINING.md`**: what a second maintainer needs - the checks, the pins that need care, the
+  release steps (including checking the archive that is actually delivered), and how to add a maintainer.
+
+### Fixed
+
+- Two annotation errors mypy found: `CandidateVerdict.layout_drift` was typed `dict` but defaults to
+  `None`, and `buildcache.MIGRATIONS` had no type.
+
 ## [1.1.0] - 2026-11-05
 
 A maintenance release: documentation accuracy, one portability fix in the test suite, and release
